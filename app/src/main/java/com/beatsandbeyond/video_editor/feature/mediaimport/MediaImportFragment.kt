@@ -16,24 +16,23 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
+import com.beatsandbeyond.video_editor.R
 import com.beatsandbeyond.video_editor.core.domain.model.MediaFilter
 import com.beatsandbeyond.video_editor.core.utils.extensions.arePermissionsGranted
 import com.beatsandbeyond.video_editor.databinding.FragmentMediaImportBinding
 import com.beatsandbeyond.video_editor.feature.mediaimport.adapter.MediaItemAdapter
 import com.beatsandbeyond.video_editor.feature.mediaimport.model.MediaImportUiState
 import com.beatsandbeyond.video_editor.ui.base.BaseFragment
+import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 
 /**
  * Full-screen media picker that queries device storage via MediaStore.
  *
- * Handles:
- * - Runtime permission request (API-version aware: API 33+ uses granular permissions)
- * - Loading and displaying device media in a 3-column grid
- * - Multi-selection with visual feedback
- * - Filter bar (All / Videos / Photos)
- * - Confirm FAB enabled only when ≥1 item is selected
+ * Phase 2: The FAB now creates a project, imports selected media as assets,
+ * then navigates to the Project Detail screen. All navigation is driven by
+ * [MediaImportViewModel.navigationEvent] — the Fragment never decides where to go.
  */
 @AndroidEntryPoint
 class MediaImportFragment : BaseFragment<FragmentMediaImportBinding>() {
@@ -76,6 +75,7 @@ class MediaImportFragment : BaseFragment<FragmentMediaImportBinding>() {
         setupFilterChips()
         setupFab()
         observeUiState()
+        observeNavigationEvents()
         checkPermissions()
     }
 
@@ -106,10 +106,7 @@ class MediaImportFragment : BaseFragment<FragmentMediaImportBinding>() {
 
     private fun setupFab() {
         binding.fabAddMedia.setOnClickListener {
-            val selectedItems = viewModel.getSelectedItems()
-            // Phase 2: Pass selected items to project creation flow
-            // For now, navigate back to home (items are ready to consume)
-            findNavController().navigateUp()
+            viewModel.createProjectFromSelection()
         }
     }
 
@@ -125,30 +122,34 @@ class MediaImportFragment : BaseFragment<FragmentMediaImportBinding>() {
         }
     }
 
-    private fun renderState(state: MediaImportUiState) {
-        when (state) {
-            is MediaImportUiState.Checking -> {
-                showLoading()
-            }
-            is MediaImportUiState.PermissionRequired -> {
-                showPermissionRequired(state.shouldShowRationale)
-            }
-            is MediaImportUiState.PermissionPermanentlyDenied -> {
-                showPermissionPermanentlyDenied()
-            }
-            is MediaImportUiState.Loading -> {
-                showLoading()
-            }
-            is MediaImportUiState.Content -> {
-                showContent(state)
-            }
-            is MediaImportUiState.Error -> {
-                showError(state.message)
+    private fun observeNavigationEvents() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.navigationEvent.collect { event ->
+                    when (event) {
+                        is MediaImportViewModel.NavigationEvent.OpenProject -> {
+                            val action = MediaImportFragmentDirections
+                                .actionMediaImportFragmentToProjectDetailFragment(event.projectId)
+                            findNavController().navigate(action)
+                        }
+                    }
+                }
             }
         }
     }
 
     // ── State renderers ───────────────────────────────────────────────────────
+
+    private fun renderState(state: MediaImportUiState) {
+        when (state) {
+            is MediaImportUiState.Checking -> showLoading()
+            is MediaImportUiState.PermissionRequired -> showPermissionRequired(state.shouldShowRationale)
+            is MediaImportUiState.PermissionPermanentlyDenied -> showPermissionPermanentlyDenied()
+            is MediaImportUiState.Loading -> showLoading()
+            is MediaImportUiState.Content -> showContent(state)
+            is MediaImportUiState.Error -> showError(state.message)
+        }
+    }
 
     private fun showLoading() {
         binding.loadingIndicator.visibility = View.VISIBLE
@@ -166,12 +167,22 @@ class MediaImportFragment : BaseFragment<FragmentMediaImportBinding>() {
         mediaAdapter.submitList(state.items)
         mediaAdapter.updateSelection(state.selectedIds)
 
-        // FAB visibility and label
-        if (state.hasSelection) {
+        // Creating project overlay
+        binding.creatingProjectOverlay.visibility =
+            if (state.isCreatingProject) View.VISIBLE else View.GONE
+
+        // FAB
+        if (state.hasSelection && !state.isCreatingProject) {
             binding.fabAddMedia.show()
-            binding.fabAddMedia.text = "Add ${state.selectedCount}"
+            binding.fabAddMedia.text = getString(R.string.fab_add_count, state.selectedCount)
         } else {
             binding.fabAddMedia.hide()
+        }
+
+        // One-shot error Snackbar
+        state.errorMessage?.let { message ->
+            Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
+            viewModel.dismissError()
         }
     }
 
@@ -182,12 +193,13 @@ class MediaImportFragment : BaseFragment<FragmentMediaImportBinding>() {
         binding.permissionContainer.visibility = View.VISIBLE
         binding.fabAddMedia.hide()
 
-        binding.permissionTitle.text = "Storage Permission Required"
+        binding.permissionTitle.text = getString(R.string.permission_title)
         binding.permissionMessage.text = if (shouldShowRationale) {
-            "B&B Video Editor needs access to your photos and videos to import media into your projects."
+            getString(R.string.permission_message_rationale)
         } else {
-            "Grant permission to access your media library."
+            getString(R.string.permission_message)
         }
+        binding.btnGrantPermission.text = getString(R.string.btn_grant_permission)
         binding.btnGrantPermission.setOnClickListener {
             permissionLauncher.launch(getRequiredPermissions())
         }
@@ -200,13 +212,10 @@ class MediaImportFragment : BaseFragment<FragmentMediaImportBinding>() {
         binding.permissionContainer.visibility = View.VISIBLE
         binding.fabAddMedia.hide()
 
-        binding.permissionTitle.text = "Permission Denied"
-        binding.permissionMessage.text =
-            "Please enable storage access for B&B Video Editor in your device settings."
-        binding.btnGrantPermission.text = "Open Settings"
-        binding.btnGrantPermission.setOnClickListener {
-            openAppSettings()
-        }
+        binding.permissionTitle.text = getString(R.string.permission_denied_title)
+        binding.permissionMessage.text = getString(R.string.permission_denied_message)
+        binding.btnGrantPermission.text = getString(R.string.btn_open_settings)
+        binding.btnGrantPermission.setOnClickListener { openAppSettings() }
     }
 
     private fun showError(message: String) {

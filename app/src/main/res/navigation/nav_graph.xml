@@ -5,7 +5,7 @@
     android:id="@+id/nav_graph"
     app:startDestination="@id/homeFragment">
 
-    <!-- ── Home Screen ───────────────────────────────────────────────────── -->
+    <!-- ── Home ─────────────────────────────────────────────────────────────── -->
     <fragment
         android:id="@+id/homeFragment"
         android:name="com.beatsandbeyond.video_editor.feature.home.HomeFragment"
@@ -20,13 +20,62 @@
             app:popEnterAnim="@anim/slide_in_left"
             app:popExitAnim="@anim/slide_out_right" />
 
+        <action
+            android:id="@+id/action_homeFragment_to_projectDetailFragment"
+            app:destination="@id/projectDetailFragment"
+            app:enterAnim="@anim/slide_in_right"
+            app:exitAnim="@anim/slide_out_left"
+            app:popEnterAnim="@anim/slide_in_left"
+            app:popExitAnim="@anim/slide_out_right" />
+
+        <action
+            android:id="@+id/action_homeFragment_to_assetLibraryFragment"
+            app:destination="@id/assetLibraryFragment"
+            app:enterAnim="@anim/slide_in_right"
+            app:exitAnim="@anim/slide_out_left"
+            app:popEnterAnim="@anim/slide_in_left"
+            app:popExitAnim="@anim/slide_out_right" />
+
     </fragment>
 
-    <!-- ── Media Import Screen ───────────────────────────────────────────── -->
+    <!-- ── Media Import ──────────────────────────────────────────────────────── -->
     <fragment
         android:id="@+id/mediaImportFragment"
         android:name="com.beatsandbeyond.video_editor.feature.mediaimport.MediaImportFragment"
         android:label="Select Media"
-        tools:layout="@layout/fragment_media_import" />
+        tools:layout="@layout/fragment_media_import">
+
+        <action
+            android:id="@+id/action_mediaImportFragmentToProjectDetailFragment"
+            app:destination="@id/projectDetailFragment"
+            app:enterAnim="@anim/slide_in_right"
+            app:exitAnim="@anim/slide_out_left"
+            app:popEnterAnim="@anim/slide_in_left"
+            app:popExitAnim="@anim/slide_out_right"
+            app:popUpTo="@id/homeFragment"
+            app:popUpToInclusive="false" />
+
+    </fragment>
+
+    <!-- ── Project Detail ───────────────────────────────────────────────────── -->
+    <fragment
+        android:id="@+id/projectDetailFragment"
+        android:name="com.beatsandbeyond.video_editor.feature.projectdetail.ProjectDetailFragment"
+        android:label=""
+        tools:layout="@layout/fragment_project_detail">
+
+        <!-- projectId is mandatory — never nullable. The project must exist before navigating here. -->
+        <argument
+            android:name="projectId"
+            app:argType="string" />
+
+    </fragment>
+
+    <!-- ── Asset Library ─────────────────────────────────────────────────────── -->
+    <fragment
+        android:id="@+id/assetLibraryFragment"
+        android:name="com.beatsandbeyond.video_editor.feature.assetlibrary.AssetLibraryFragment"
+        android:label="Asset Library"
+        tools:layout="@layout/fragment_asset_library" />
 
 </navigation>

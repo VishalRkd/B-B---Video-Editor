@@ -1,37 +1,38 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Spacing -->
+    <!-- ── Spacing ───────────────────────────────────────────────────────────── -->
     <dimen name="spacing_xs">4dp</dimen>
     <dimen name="spacing_sm">8dp</dimen>
     <dimen name="spacing_md">16dp</dimen>
     <dimen name="spacing_lg">24dp</dimen>
     <dimen name="spacing_xl">32dp</dimen>
-    <dimen name="spacing_xxl">48dp</dimen>
 
-    <!-- Media Grid -->
-    <dimen name="media_grid_item_size">120dp</dimen>
-    <dimen name="media_grid_spacing">2dp</dimen>
-    <dimen name="media_duration_badge_text_size">11sp</dimen>
-    <dimen name="media_duration_badge_padding_h">6dp</dimen>
-    <dimen name="media_duration_badge_padding_v">2dp</dimen>
-
-    <!-- Corners -->
+    <!-- ── Corner Radii ─────────────────────────────────────────────────────── -->
     <dimen name="corner_sm">4dp</dimen>
     <dimen name="corner_md">8dp</dimen>
     <dimen name="corner_lg">12dp</dimen>
-    <dimen name="corner_xl">16dp</dimen>
+    <dimen name="corner_xl">24dp</dimen>
 
-    <!-- Icon sizes -->
-    <dimen name="icon_size_sm">20dp</dimen>
+    <!-- ── Icons ─────────────────────────────────────────────────────────────── -->
+    <dimen name="icon_size_sm">16dp</dimen>
     <dimen name="icon_size_md">24dp</dimen>
     <dimen name="icon_size_lg">48dp</dimen>
     <dimen name="icon_size_hero">96dp</dimen>
 
-    <!-- Empty state -->
-    <dimen name="empty_state_icon_size">96dp</dimen>
+    <!-- ── Media Grid ────────────────────────────────────────────────────────── -->
+    <dimen name="media_grid_spacing">1dp</dimen>
+    <dimen name="media_grid_item_size">120dp</dimen>
+    <dimen name="media_duration_badge_padding_h">4dp</dimen>
+    <dimen name="media_duration_badge_padding_v">2dp</dimen>
+    <dimen name="media_duration_badge_text_size">10sp</dimen>
 
-    <!-- Elevation -->
-    <dimen name="elevation_card">4dp</dimen>
-    <dimen name="elevation_fab">6dp</dimen>
-    <dimen name="elevation_toolbar">0dp</dimen>
+    <!-- ── Project Card ──────────────────────────────────────────────────────── -->
+    <dimen name="project_card_thumbnail_height">100dp</dimen>
+
+    <!-- ── Timeline ─────────────────────────────────────────────────────────── -->
+    <dimen name="timeline_clip_width">80dp</dimen>
+    <dimen name="timeline_clip_height">72dp</dimen>
+
+    <!-- ── Editor ────────────────────────────────────────────────────────────── -->
+    <dimen name="editor_scrim_height">120dp</dimen>
+    <dimen name="playback_control_size">56dp</dimen>
 </resources>

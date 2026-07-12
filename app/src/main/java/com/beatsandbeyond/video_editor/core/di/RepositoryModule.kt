@@ -2,8 +2,10 @@ package com.beatsandbeyond.video_editor.core.di
 
 import com.beatsandbeyond.video_editor.core.data.datasource.MediaStoreDataSource
 import com.beatsandbeyond.video_editor.core.data.datasource.MediaStoreDataSourceImpl
+import com.beatsandbeyond.video_editor.core.data.repository.AssetRepositoryImpl
 import com.beatsandbeyond.video_editor.core.data.repository.MediaRepositoryImpl
 import com.beatsandbeyond.video_editor.core.data.repository.ProjectRepositoryImpl
+import com.beatsandbeyond.video_editor.core.domain.repository.AssetRepository
 import com.beatsandbeyond.video_editor.core.domain.repository.MediaRepository
 import com.beatsandbeyond.video_editor.core.domain.repository.ProjectRepository
 import dagger.Binds
@@ -33,6 +35,12 @@ abstract class RepositoryModule {
     abstract fun bindProjectRepository(
         impl: ProjectRepositoryImpl,
     ): ProjectRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindAssetRepository(
+        impl: AssetRepositoryImpl,
+    ): AssetRepository
 
     @Binds
     @Singleton

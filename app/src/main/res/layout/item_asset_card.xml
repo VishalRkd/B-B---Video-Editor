@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/media_grid_item_size"
+    android:layout_margin="@dimen/media_grid_spacing">
+
+    <ImageView
+        android:id="@+id/assetThumbnail"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        tools:background="@color/color_surface_variant" />
+
+    <!-- Duration badge (videos only) -->
+    <TextView
+        android:id="@+id/videoBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="@dimen/spacing_xs"
+        android:background="@drawable/bg_duration_badge"
+        android:paddingHorizontal="@dimen/media_duration_badge_padding_h"
+        android:paddingVertical="@dimen/media_duration_badge_padding_v"
+        android:textColor="@color/white"
+        android:textSize="@dimen/media_duration_badge_text_size"
+        android:visibility="gone"
+        tools:text="0:30"
+        tools:visibility="visible" />
+
+    <!-- Asset name at bottom -->
+    <TextView
+        android:id="@+id/assetName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/color_badge_background"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingHorizontal="@dimen/spacing_xs"
+        android:paddingVertical="2dp"
+        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+        android:textColor="@color/white"
+        android:textSize="@dimen/media_duration_badge_text_size"
+        tools:text="clip_name" />
+
+</FrameLayout>

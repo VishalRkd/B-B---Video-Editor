@@ -4,12 +4,17 @@ import androidx.lifecycle.viewModelScope
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.model.MediaFilter
 import com.beatsandbeyond.video_editor.core.domain.model.MediaItem
+import com.beatsandbeyond.video_editor.core.domain.usecase.asset.ImportAssetsUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.media.GetMediaItemsUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.project.CreateProjectUseCase
 import com.beatsandbeyond.video_editor.feature.mediaimport.model.MediaImportUiState
 import com.beatsandbeyond.video_editor.ui.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -23,14 +28,32 @@ import javax.inject.Inject
  * - Loading media from device storage
  * - Multi-selection of media items
  * - Filter changes (All / Videos / Photos)
+ * - Project creation from selected media (Phase 2)
+ *
+ * Navigation events are emitted via [navigationEvent] SharedFlow so the Fragment
+ * never needs to call ViewModel methods that inspect nav state — a clean separation.
  */
 @HiltViewModel
 class MediaImportViewModel @Inject constructor(
     private val getMediaItemsUseCase: GetMediaItemsUseCase,
+    private val createProjectUseCase: CreateProjectUseCase,
+    private val importAssetsUseCase: ImportAssetsUseCase,
 ) : BaseViewModel() {
 
     private val _uiState = MutableStateFlow<MediaImportUiState>(MediaImportUiState.Checking)
     val uiState: StateFlow<MediaImportUiState> = _uiState.asStateFlow()
+
+    /**
+     * One-shot navigation events emitted when project creation succeeds.
+     * Fragment collects and navigates to ProjectDetail.
+     */
+    private val _navigationEvent = MutableSharedFlow<NavigationEvent>()
+    val navigationEvent: SharedFlow<NavigationEvent> = _navigationEvent.asSharedFlow()
+
+    sealed class NavigationEvent {
+        /** Navigate to the project detail screen with this project ID. */
+        data class OpenProject(val projectId: String) : NavigationEvent()
+    }
 
     // ── Permission handling ─────────────────────────────────────────────────
 
@@ -98,16 +121,87 @@ class MediaImportViewModel @Inject constructor(
         return if (state is MediaImportUiState.Content) state.selectedItems else emptyList()
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // ── Project creation ────────────────────────────────────────────────────
 
     /**
-     * When reloading media (e.g., after a filter change), preserves selection for
-     * items that still appear in the new result set.
+     * Creates a new project from the currently selected media items.
+     * On success, emits [NavigationEvent.OpenProject] to navigate to the project detail screen.
+     * On failure, emits an error state so the Fragment can show a Snackbar.
      */
+    fun createProjectFromSelection() {
+        val selectedItems = getSelectedItems()
+        if (selectedItems.isEmpty()) return
+
+        launchSafely {
+            _uiState.update { state ->
+                if (state is MediaImportUiState.Content) state.copy(isCreatingProject = true)
+                else state
+            }
+
+            // Step 1: Create the project skeleton
+            val projectName = generateDefaultProjectName()
+            val createResult = createProjectUseCase(name = projectName)
+
+            when (createResult) {
+                is AppResult.Success -> {
+                    val project = createResult.data
+
+                    // Step 2: Import selected media as Assets bound to the new project
+                    val importResult = importAssetsUseCase(
+                        mediaItems = selectedItems,
+                        projectId = project.id,
+                    )
+
+                    when (importResult) {
+                        is AppResult.Success -> {
+                            _navigationEvent.emit(NavigationEvent.OpenProject(project.id))
+                        }
+                        is AppResult.Error -> {
+                            _uiState.update { state ->
+                                if (state is MediaImportUiState.Content) {
+                                    state.copy(
+                                        isCreatingProject = false,
+                                        errorMessage = importResult.message ?: "Failed to import media",
+                                    )
+                                } else state
+                            }
+                        }
+                        is AppResult.Loading -> Unit
+                    }
+                }
+                is AppResult.Error -> {
+                    _uiState.update { state ->
+                        if (state is MediaImportUiState.Content) {
+                            state.copy(
+                                isCreatingProject = false,
+                                errorMessage = createResult.message ?: "Failed to create project",
+                            )
+                        } else state
+                    }
+                }
+                is AppResult.Loading -> Unit
+            }
+        }
+    }
+
+    fun dismissError() {
+        _uiState.update { state ->
+            if (state is MediaImportUiState.Content) state.copy(errorMessage = null)
+            else state
+        }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────
+
     private fun preserveSelection(newItems: List<MediaItem>): Set<Long> {
         val currentState = _uiState.value
         if (currentState !is MediaImportUiState.Content) return emptySet()
         val newItemIds = newItems.map { it.id }.toSet()
         return currentState.selectedIds.intersect(newItemIds)
+    }
+
+    private fun generateDefaultProjectName(): String {
+        val formatter = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
+        return "Project — ${formatter.format(java.util.Date())}"
     }
 }

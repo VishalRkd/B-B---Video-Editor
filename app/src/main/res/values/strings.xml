@@ -1,32 +1,44 @@
 <resources>
-    <!-- App Name -->
+    <!-- ── App ──────────────────────────────────────────────────────────────── -->
     <string name="app_name">B&amp;B Video Editor</string>
 
-    <!-- Home Screen -->
-    <string name="home_empty_title">No Projects Yet</string>
-    <string name="home_empty_subtitle">Create your first video project to get started</string>
+    <!-- ── Home ─────────────────────────────────────────────────────────────── -->
+    <string name="home_empty_title">Start Creating</string>
+    <string name="home_empty_subtitle">Import videos and photos to create your first project</string>
     <string name="new_project">New Project</string>
+    <string name="asset_library">Asset Library</string>
+    <string name="asset_library_empty">No assets imported yet.\nCreate a project to import media.</string>
 
-    <!-- Media Import Screen -->
+    <!-- ── Media Import ──────────────────────────────────────────────────────── -->
     <string name="select_media">Select Media</string>
     <string name="filter_all">All</string>
     <string name="filter_videos">Videos</string>
     <string name="filter_photos">Photos</string>
     <string name="add_to_project">Add to Project</string>
+    <string name="fab_add_count">Add %d</string>
+    <string name="creating_project">Creating project…</string>
+    <string name="error_load_media">Failed to load media. Please try again.</string>
 
-    <!-- Permission UI -->
-    <string name="permission_title">Permission Required</string>
-    <string name="permission_message">B&amp;B Video Editor needs access to your photos and videos.</string>
+    <!-- ── Permissions ───────────────────────────────────────────────────────── -->
+    <string name="permission_title">Media Access Required</string>
+    <string name="permission_message">Grant permission to access your media library.</string>
+    <string name="permission_message_rationale">B&amp;B Video Editor needs access to your photos and videos to import media into your projects.</string>
+    <string name="permission_denied_title">Permission Denied</string>
+    <string name="permission_denied_message">Please enable storage access for B&amp;B Video Editor in your device settings.</string>
     <string name="btn_grant_permission">Grant Permission</string>
     <string name="btn_open_settings">Open Settings</string>
 
-    <!-- Error States -->
-    <string name="error_load_media">Failed to load media. Please try again.</string>
-    <string name="error_generic">Something went wrong. Please try again.</string>
+    <!-- ── Project Detail ───────────────────────────────────────────────────── -->
+    <string name="cd_play_pause">Play / Pause</string>
 
-    <!-- Content Descriptions -->
-    <string name="cd_media_thumbnail">Media thumbnail</string>
-    <string name="cd_selection_checkbox">Item selected</string>
-    <string name="cd_back_button">Navigate back</string>
+    <!-- ── Dialogs ───────────────────────────────────────────────────────────── -->
+    <string name="dialog_delete_project_title">Delete Project</string>
+    <string name="dialog_delete_project_message">Delete &#8220;%s&#8221;? This cannot be undone.</string>
+    <string name="btn_delete">Delete</string>
+    <string name="btn_cancel">Cancel</string>
+
+    <!-- ── Accessibility ─────────────────────────────────────────────────────── -->
     <string name="cd_app_logo">B&amp;B Video Editor logo</string>
+    <string name="cd_media_thumbnail">Media thumbnail</string>
+    <string name="cd_selection_checkbox">Selected</string>
 </resources>

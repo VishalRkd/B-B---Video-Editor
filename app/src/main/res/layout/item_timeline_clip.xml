@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="@dimen/timeline_clip_width"
+    android:layout_height="@dimen/timeline_clip_height"
+    android:layout_marginEnd="@dimen/spacing_xs">
+
+    <!-- Clip thumbnail -->
+    <ImageView
+        android:id="@+id/clipThumbnail"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        tools:background="@color/color_surface_variant" />
+
+    <!-- Clip name overlay at bottom -->
+    <TextView
+        android:id="@+id/clipName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/color_badge_background"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:paddingHorizontal="@dimen/spacing_xs"
+        android:paddingVertical="2dp"
+        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+        android:textColor="@color/white"
+        android:textSize="@dimen/media_duration_badge_text_size"
+        tools:text="clip_name" />
+
+    <!-- Selection border (primary color, shown when clip is active) -->
+    <View
+        android:id="@+id/activeBorder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_clip_active_border"
+        android:visibility="gone" />
+
+</FrameLayout>

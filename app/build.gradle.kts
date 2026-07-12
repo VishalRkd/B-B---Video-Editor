@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.navigation.safe.args)
 }
 
 android {
@@ -76,11 +77,18 @@ dependencies {
     implementation(libs.coil)
     implementation(libs.coil.video)
 
+    // ── Media3 (ExoPlayer) ────────────────────────────────────────────────────
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.media3.common)
+
     // ── JSON Serialization ────────────────────────────────────────────────────
     implementation(libs.gson)
 
     // ── Testing ───────────────────────────────────────────────────────────────
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.androidx.core.testing)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }

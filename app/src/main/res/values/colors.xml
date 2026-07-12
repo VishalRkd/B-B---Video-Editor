@@ -49,4 +49,10 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
+    <!-- ── Editor ─────────────────────────────────────────────────────────── -->
+    <!-- Bottom bar background: dark, slightly elevated above the pure black video bg -->
+    <color name="color_editor_bottom_bar">#CC0D0C0E</color>
+    <!-- Semi-transparent dark scrim for loading overlays -->
+    <color name="color_scrim">#CC0D0C0E</color>
+
 </resources>

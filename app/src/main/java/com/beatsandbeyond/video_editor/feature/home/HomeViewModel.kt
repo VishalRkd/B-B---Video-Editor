@@ -1,53 +1,59 @@
 package com.beatsandbeyond.video_editor.feature.home
 
-import androidx.lifecycle.viewModelScope
 import com.beatsandbeyond.video_editor.core.common.AppResult
-import com.beatsandbeyond.video_editor.core.domain.repository.ProjectRepository
+import com.beatsandbeyond.video_editor.core.domain.usecase.project.DeleteProjectUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.project.GetAllProjectsUseCase
 import com.beatsandbeyond.video_editor.feature.home.model.HomeUiState
 import com.beatsandbeyond.video_editor.ui.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 
 /**
  * ViewModel for the Home screen.
  *
- * Observes [ProjectRepository.getAllProjects] and maps the result to [HomeUiState].
- * The UI simply collects [uiState] — it has no direct knowledge of the repository.
- *
- * Phase 1: Shows Loading → Empty (no projects exist yet).
- * Phase 2: Will show Content with the list of saved projects.
+ * Loads the project list reactively from Room — any change (create/delete) is reflected
+ * automatically without manual refresh. Handles soft-delete via [deleteProject].
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
-    private val projectRepository: ProjectRepository,
+    private val getAllProjectsUseCase: GetAllProjectsUseCase,
+    private val deleteProjectUseCase: DeleteProjectUseCase,
 ) : BaseViewModel() {
 
-    /**
-     * The current UI state, derived reactively from the project repository.
-     * Backed by a [StateFlow] so the Fragment always has the latest value on
-     * configuration changes without re-subscribing.
-     */
-    val uiState: StateFlow<HomeUiState> = projectRepository
-        .getAllProjects()
-        .map { result ->
-            when (result) {
-                is AppResult.Loading -> HomeUiState.Loading
-                is AppResult.Success -> {
-                    if (result.data.isEmpty()) HomeUiState.Empty
-                    else HomeUiState.Content(result.data)
+    private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
+    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    init {
+        loadProjects()
+    }
+
+    private fun loadProjects() {
+        launchSafely {
+            getAllProjectsUseCase().collect { result ->
+                _uiState.value = when (result) {
+                    is AppResult.Loading -> HomeUiState.Loading
+                    is AppResult.Success -> {
+                        if (result.data.isEmpty()) HomeUiState.Empty
+                        else HomeUiState.Content(result.data)
+                    }
+                    is AppResult.Error -> HomeUiState.Error(
+                        result.message ?: "Failed to load projects"
+                    )
                 }
-                is AppResult.Error -> HomeUiState.Error(
-                    result.message ?: "Failed to load projects"
-                )
             }
         }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = HomeUiState.Loading,
-        )
+    }
+
+    /**
+     * Permanently deletes a project and all its associated assets.
+     * The project list updates automatically via the reactive [getAllProjectsUseCase] Flow.
+     */
+    fun deleteProject(projectId: String) {
+        launchSafely {
+            deleteProjectUseCase(projectId)
+        }
+    }
 }

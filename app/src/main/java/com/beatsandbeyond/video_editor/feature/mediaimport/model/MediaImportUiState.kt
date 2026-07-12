@@ -5,6 +5,9 @@ import com.beatsandbeyond.video_editor.core.domain.model.MediaItem
 
 /**
  * Represents all possible UI states for the Media Import screen.
+ *
+ * Using a sealed class ensures exhaustive [when] expressions in the Fragment,
+ * preventing unhandled states from being silently ignored.
  */
 sealed class MediaImportUiState {
 
@@ -26,14 +29,18 @@ sealed class MediaImportUiState {
 
     /**
      * Media loaded successfully and the grid is ready to display.
-     * @param items        All media items matching the current [filter].
-     * @param selectedIds  Set of IDs of currently selected items.
-     * @param filter       The currently applied filter.
+     * @param items             All media items matching the current [filter].
+     * @param selectedIds       Set of IDs of currently selected items.
+     * @param filter            The currently applied filter.
+     * @param isCreatingProject True while the project creation async operation is running.
+     * @param errorMessage      Non-null when a one-shot error should be shown (Snackbar).
      */
     data class Content(
         val items: List<MediaItem>,
         val selectedIds: Set<Long> = emptySet(),
         val filter: MediaFilter = MediaFilter.ALL,
+        val isCreatingProject: Boolean = false,
+        val errorMessage: String? = null,
     ) : MediaImportUiState() {
         val selectedCount: Int get() = selectedIds.size
         val hasSelection: Boolean get() = selectedIds.isNotEmpty()

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    tools:context=".feature.projectdetail.ProjectDetailFragment">
+
+    <!-- ── Video Preview Surface ──────────────────────────────────────────────── -->
+    <SurfaceView
+        android:id="@+id/previewSurface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="invisible"
+        tools:visibility="visible" />
+
+    <!-- ── Buffering overlay ─────────────────────────────────────────────────── -->
+    <com.google.android.material.progressindicator.CircularProgressIndicator
+        android:id="@+id/bufferingIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:visibility="gone"
+        app:indicatorColor="@color/color_primary"
+        tools:visibility="gone" />
+
+    <!-- ── Loading overlay ───────────────────────────────────────────────────── -->
+    <com.google.android.material.progressindicator.CircularProgressIndicator
+        android:id="@+id/loadingIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:visibility="visible"
+        app:indicatorColor="@color/color_primary"
+        tools:visibility="gone" />
+
+    <!-- ── Error message ─────────────────────────────────────────────────────── -->
+    <TextView
+        android:id="@+id/errorMessage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:paddingHorizontal="@dimen/spacing_xl"
+        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+        android:textColor="@color/color_on_surface_variant"
+        android:visibility="gone"
+        tools:text="Failed to load project"
+        tools:visibility="gone" />
+
+    <!-- ── Top gradient scrim for toolbar ───────────────────────────────────── -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/editor_scrim_height"
+        android:background="@drawable/bg_editor_top_scrim" />
+
+    <!-- ── Toolbar ───────────────────────────────────────────────────────────── -->
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:paddingTop="?attr/actionBarSize"
+        android:background="@android:color/transparent"
+        app:navigationIcon="@drawable/ic_arrow_back"
+        app:navigationIconTint="@color/white"
+        app:title=""
+        app:titleTextColor="@color/white" />
+
+    <!-- ── Bottom bar (timeline strip + controls) ────────────────────────────── -->
+    <LinearLayout
+        android:id="@+id/bottomBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/color_editor_bottom_bar"
+        android:orientation="vertical"
+        android:paddingBottom="@dimen/spacing_md"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <!-- Timeline clip strip -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/timelineClipStrip"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/timeline_clip_height"
+            android:clipToPadding="false"
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/spacing_md"
+            android:scrollbars="none"
+            tools:listitem="@layout/item_timeline_clip" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="@dimen/spacing_sm"
+            android:background="@color/color_outline_variant" />
+
+        <!-- Playback controls row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingTop="@dimen/spacing_sm">
+
+            <!-- Play / Pause -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPlayPause"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="@dimen/playback_control_size"
+                android:layout_height="@dimen/playback_control_size"
+                android:contentDescription="@string/cd_play_pause"
+                app:iconSize="@dimen/icon_size_md"
+                app:icon="@drawable/ic_play"
+                app:iconTint="@color/color_on_surface" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

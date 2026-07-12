@@ -171,3 +171,52 @@ This file records significant architectural decisions, the alternatives consider
 - `StateFlow` always has a value (no null initial state issues)
 - Coroutines-based collection integrates with `repeatOnLifecycle`
 - LiveData is effectively in maintenance mode
+
+---
+
+## ADR-011: AndroidX Media3 (ExoPlayer) for Preview Engine
+
+**Date**: Phase 2  
+**Status**: Active
+
+**Decision**: Use `androidx.media3:media3-exoplayer` (version `1.6.1`) as the implementation of `PreviewEngine`. The implementation is in `ExoPlayerPreviewEngine` in the data layer.
+
+**Alternatives Considered**:
+- Legacy standalone ExoPlayer (`com.google.android.exoplayer2`)
+- Custom MediaCodec + MediaSync pipeline
+- Device's default `MediaPlayer`
+
+**Rationale**:
+- `androidx.media3` is Google's official successor to the legacy ExoPlayer library
+- Integrates with `MediaSession` for future background playback support (Phase N)
+- Provides `Player.Listener` for reliable playback state callbacks
+- `MediaPlayer` API is too low-level and lacks the composition capabilities needed for Phase 3 multi-track
+- MediaCodec is the right long-term choice (Phase N export) but too complex for Phase 2 preview
+
+**Architecture Impact**:
+- `ExoPlayerPreviewEngine` lives in `core/data/engine/` — no ExoPlayer imports leak to feature or domain layers
+- `PreviewEngine` interface is the contract — feature ViewModels are fully decoupled from ExoPlayer
+- `EngineModule` in `core/di/` binds the interface to the implementation
+- Engine is `@Singleton` — single ExoPlayer instance reused across the app lifecycle
+
+**Migration Path**: When multi-track composition is needed (Phase 3+), replace `ExoPlayerPreviewEngine` with a `MediaCodecPreviewEngine` behind the same `PreviewEngine` interface — zero changes required in feature layer.
+
+---
+
+## ADR-012: Navigation Safe Args for Type-Safe Fragment Arguments
+
+**Date**: Phase 2  
+**Status**: Active
+
+**Decision**: Use `androidx.navigation.safeargs.kotlin` plugin to generate type-safe argument classes for fragment navigation.
+
+**Rationale**:
+- Eliminates runtime `Bundle` key string errors
+- Generates `XxxFragmentArgs` (consumer) and `XxxFragmentDirections` (producer) at compile time
+- Mandatory for `projectId: String` passed to `ProjectDetailFragment` — without Safe Args, a typo in the key string would only fail at runtime
+- Consistent with the project's philosophy of catching errors at compile time
+
+**Usage**:
+- `ProjectDetailFragment` receives `projectId` via `navArgs()` delegate
+- `HomeFragmentDirections.actionHomeFragmentToProjectDetailFragment(project.id)` is generated
+- `MediaImportFragmentDirections.actionMediaImportFragmentToProjectDetailFragment(projectId)` is generated
