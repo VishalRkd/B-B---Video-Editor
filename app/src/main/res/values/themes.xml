@@ -1,9 +1,55 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.BBVideoEditor" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+
+    <!-- ── Base Theme ─────────────────────────────────────────────────────── -->
+    <style name="Base.Theme.BBVideoEditor" parent="Theme.Material3.Dark.NoActionBar">
+
+        <!-- Primary accent: amber-orange -->
+        <item name="colorPrimary">@color/color_primary</item>
+        <item name="colorOnPrimary">@color/color_on_primary</item>
+        <item name="colorPrimaryContainer">@color/color_primary_variant</item>
+
+        <!-- Secondary accent: electric purple -->
+        <item name="colorSecondary">@color/color_secondary</item>
+        <item name="colorOnSecondary">@color/color_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/color_secondary_variant</item>
+
+        <!-- Tertiary: teal -->
+        <item name="colorTertiary">@color/color_tertiary</item>
+        <item name="colorOnTertiary">@color/color_on_tertiary</item>
+
+        <!-- Background and surfaces -->
+        <item name="android:colorBackground">@color/color_background</item>
+        <item name="colorSurface">@color/color_surface</item>
+        <item name="colorSurfaceVariant">@color/color_surface_variant</item>
+        <item name="colorOnBackground">@color/color_on_background</item>
+        <item name="colorOnSurface">@color/color_on_surface</item>
+        <item name="colorOnSurfaceVariant">@color/color_on_surface_variant</item>
+
+        <!-- Error -->
+        <item name="colorError">@color/color_error</item>
+        <item name="colorOnError">@color/color_on_error</item>
+
+        <!-- Outline -->
+        <item name="colorOutline">@color/color_outline</item>
+
+        <!-- Status bar and navigation bar -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+
     </style>
 
     <style name="Theme.BBVideoEditor" parent="Base.Theme.BBVideoEditor" />
+
+    <!-- ── Toolbar style ─────────────────────────────────────────────────── -->
+    <style name="Widget.BBVideoEditor.Toolbar" parent="Widget.Material3.Toolbar">
+        <item name="android:background">@color/color_surface</item>
+        <item name="titleTextColor">@color/color_on_surface</item>
+        <item name="navigationIconTint">@color/color_on_surface</item>
+    </style>
+
+    <!-- ── Chip style ────────────────────────────────────────────────────── -->
+    <style name="Widget.BBVideoEditor.Chip" parent="Widget.Material3.Chip.Filter">
+        <item name="android:textColor">@color/color_on_surface_variant</item>
+    </style>
+
 </resources>

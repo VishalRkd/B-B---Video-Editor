@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/color_background"
+    tools:context=".feature.home.HomeFragment">
+
+    <!-- ── App Bar ───────────────────────────────────────────────────────── -->
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBarLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/color_surface"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:paddingTop="?attr/actionBarSize"
+            app:title="@string/app_name"
+            app:titleTextColor="@color/color_on_surface"
+            app:titleTextAppearance="@style/TextAppearance.Material3.TitleLarge" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <!-- ── Loading Indicator ─────────────────────────────────────────────── -->
+    <com.google.android.material.progressindicator.CircularProgressIndicator
+        android:id="@+id/loadingIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:indeterminate="true"
+        android:visibility="gone"
+        app:indicatorColor="@color/color_primary"
+        tools:visibility="gone" />
+
+    <!-- ── Empty State ────────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:id="@+id/emptyStateContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="@dimen/spacing_xl"
+        android:paddingTop="80dp"
+        android:visibility="visible"
+        tools:visibility="visible">
+
+        <!-- Hero Icon -->
+        <ImageView
+            android:id="@+id/emptyStateIcon"
+            android:layout_width="@dimen/icon_size_hero"
+            android:layout_height="@dimen/icon_size_hero"
+            android:contentDescription="@string/cd_app_logo"
+            android:src="@drawable/ic_launcher_foreground"
+            android:tint="@color/color_primary"
+            android:alpha="0.85" />
+
+        <!-- Title -->
+        <TextView
+            android:id="@+id/emptyStateTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_lg"
+            android:text="@string/home_empty_title"
+            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+            android:textColor="@color/color_on_surface" />
+
+        <!-- Subtitle -->
+        <TextView
+            android:id="@+id/emptyStateSubtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_sm"
+            android:gravity="center"
+            android:text="@string/home_empty_subtitle"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="@color/color_on_surface_variant" />
+
+        <!-- New Project Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnNewProject"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_xl"
+            android:paddingHorizontal="@dimen/spacing_xl"
+            android:text="@string/new_project"
+            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+            app:backgroundTint="@color/color_primary"
+            app:cornerRadius="@dimen/corner_xl"
+            app:icon="@android:drawable/ic_input_add"
+            app:iconTint="@color/color_on_primary" />
+
+    </LinearLayout>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

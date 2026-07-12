@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        FileProvider paths for B&B Video Editor.
+        - exports/: exported video files shared to gallery or other apps
+        - thumbnails/: generated project thumbnails shared externally
+    -->
+    <files-path
+        name="exports"
+        path="exports/" />
+    <cache-path
+        name="thumbnails"
+        path="thumbnails/" />
+</paths>

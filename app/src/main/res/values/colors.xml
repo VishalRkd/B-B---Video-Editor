@@ -1,5 +1,52 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+
+    <!-- ── Brand / Accent Colors ──────────────────────────────────────────── -->
+    <!-- Primary accent: Vibrant amber-orange — energetic and creative -->
+    <color name="color_primary">#FFAF3F</color>
+    <color name="color_primary_variant">#E8943A</color>
+    <color name="color_on_primary">#1A0D00</color>
+
+    <!-- Secondary: Electric purple — premium and modern -->
+    <color name="color_secondary">#A97CFF</color>
+    <color name="color_secondary_variant">#8B5CF6</color>
+    <color name="color_on_secondary">#17003A</color>
+
+    <!-- Tertiary: Teal — balanced and fresh -->
+    <color name="color_tertiary">#00D4AA</color>
+    <color name="color_on_tertiary">#00382D</color>
+
+    <!-- Error -->
+    <color name="color_error">#FF5252</color>
+    <color name="color_on_error">#FFFFFF</color>
+
+    <!-- ── Dark Background Surface Stack ─────────────────────────────────── -->
+    <!-- Background: near-black with a very subtle warm tint -->
+    <color name="color_background">#0D0C0E</color>
+    <!-- Surface: slightly elevated surface -->
+    <color name="color_surface">#1A1920</color>
+    <!-- Surface variant: containers, cards -->
+    <color name="color_surface_variant">#232231</color>
+    <!-- Surface bright: overlays, dialogs -->
+    <color name="color_surface_bright">#2D2C3C</color>
+
+    <!-- ── Text / Content Colors ──────────────────────────────────────────── -->
+    <color name="color_on_background">#F0EFFF</color>
+    <color name="color_on_surface">#F0EFFF</color>
+    <color name="color_on_surface_variant">#A9A8C0</color>
+
+    <!-- ── Utility ─────────────────────────────────────────────────────────── -->
+    <color name="color_outline">#3D3C52</color>
+    <color name="color_outline_variant">#2A293D</color>
+
+    <!-- Duration badge background (semi-transparent dark) -->
+    <color name="color_badge_background">#B3000000</color>
+
+    <!-- Selection overlay (semi-transparent primary) -->
+    <color name="color_selection_overlay">#66FFAF3F</color>
+
+    <!-- Standard black and white -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
 </resources>

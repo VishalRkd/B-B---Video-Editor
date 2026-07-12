@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/media_grid_item_size">
+
+    <!-- Thumbnail -->
+    <ImageView
+        android:id="@+id/thumbnailImage"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@string/cd_media_thumbnail"
+        android:scaleType="centerCrop"
+        tools:background="@color/color_surface_variant" />
+
+    <!-- Selection overlay (dimming layer) -->
+    <View
+        android:id="@+id/selectionOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/color_selection_overlay"
+        android:visibility="gone" />
+
+    <!-- Duration badge (visible for videos only) -->
+    <TextView
+        android:id="@+id/durationBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="@dimen/spacing_xs"
+        android:background="@drawable/bg_duration_badge"
+        android:paddingHorizontal="@dimen/media_duration_badge_padding_h"
+        android:paddingVertical="@dimen/media_duration_badge_padding_v"
+        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+        android:textColor="@color/white"
+        android:textSize="@dimen/media_duration_badge_text_size"
+        android:visibility="gone"
+        tools:text="1:30"
+        tools:visibility="visible" />
+
+    <!-- Selection checkbox (top-right, visible when selected) -->
+    <com.google.android.material.checkbox.MaterialCheckBox
+        android:id="@+id/selectionCheckbox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="@dimen/spacing_xs"
+        android:clickable="false"
+        android:contentDescription="@string/cd_selection_checkbox"
+        android:focusable="false"
+        android:visibility="gone"
+        app:buttonTint="@color/color_primary"
+        tools:checked="true"
+        tools:visibility="visible" />
+
+    <!-- 1dp gap between grid items -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/media_grid_spacing"
+        android:layout_gravity="bottom"
+        android:background="@color/color_background" />
+
+</FrameLayout>
