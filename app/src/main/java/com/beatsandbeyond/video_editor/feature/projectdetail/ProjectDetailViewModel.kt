@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.engine.PreviewEngine
 import com.beatsandbeyond.video_editor.core.domain.model.*
-import com.beatsandbeyond.video_editor.core.domain.usecase.asset.GetAllAssetsUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.asset.GetAssetsByProjectIdUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.GetProjectByIdUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.UpdateProjectUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.timeline.*
@@ -32,7 +32,7 @@ class ProjectDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val getProjectByIdUseCase: GetProjectByIdUseCase,
     private val updateProjectUseCase: UpdateProjectUseCase,
-    private val getAllAssetsUseCase: GetAllAssetsUseCase,
+    private val getAssetsByProjectIdUseCase: GetAssetsByProjectIdUseCase,
     private val previewEngine: PreviewEngine,
     private val trimClipUseCase: TrimClipUseCase,
     private val splitClipUseCase: SplitClipUseCase,
@@ -67,7 +67,7 @@ class ProjectDetailViewModel @Inject constructor(
             var project = (projectResult as AppResult.Success).data
 
             // Load assets — take the first emission
-            val assetsResult = getAllAssetsUseCase().first()
+            val assetsResult = getAssetsByProjectIdUseCase(projectId).first()
             val assets = when (assetsResult) {
                 is AppResult.Success -> assetsResult.data
                 else -> emptyList()
@@ -157,15 +157,39 @@ class ProjectDetailViewModel @Inject constructor(
         val content = currentContent ?: return
         val clipId = content.selectedClipId ?: return
         val project = currentProject ?: return
+        val originalClip = project.timeline.findClip(clipId) ?: return
 
         when (val result = trimClipUseCase(project, clipId, newTrimStartMs, newTrimEndMs)) {
             is AppResult.Success -> {
                 if (isFinal) {
-                    applyEdit(result.data)
+                    val updatedProject = result.data
+                    val updatedClip = updatedProject.timeline.findClip(clipId)
+                    val isTrimmingLeft = newTrimStartMs != originalClip.trimStartMs
+                    
+                    val targetTimelinePos = if (isTrimmingLeft) {
+                        updatedClip?.timelinePositionMs ?: 0L
+                    } else {
+                        updatedClip?.timelineEndMs ?: 0L
+                    }
+
+                    launchSafely {
+                        updateProjectUseCase(updatedProject) // auto-save to Room
+                        currentProject = updatedProject
+                        refreshContent(updatedProject, content.selectedClipId)
+                        previewEngine.loadTimeline(updatedProject.timeline)
+                        previewEngine.seekTo(targetTimelinePos)
+                    }
                 } else {
                     currentProject = result.data
                     refreshContent(result.data, content.selectedClipId)
-                    seekTo(result.data.timeline.findClip(clipId)?.timelinePositionMs ?: 0L)
+                    
+                    // Seek ExoPlayer to the active trim frame relative to the currently loaded clipping config
+                    val isTrimmingLeft = newTrimStartMs != originalClip.trimStartMs
+                    val targetSourceMs = if (isTrimmingLeft) newTrimStartMs else newTrimEndMs
+                    val localOffsetMs = targetSourceMs - originalClip.trimStartMs
+                    val relativeTimelineOffsetMs = (localOffsetMs / originalClip.speedFactor).toLong()
+                    val targetTimelinePositionMs = originalClip.timelinePositionMs + relativeTimelineOffsetMs
+                    seekTo(targetTimelinePositionMs)
                 }
             }
             is AppResult.Error -> {

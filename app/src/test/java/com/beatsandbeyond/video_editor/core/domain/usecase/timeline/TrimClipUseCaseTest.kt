@@ -59,6 +59,7 @@ class TrimClipUseCaseTest {
         val updatedClip = updatedProject.timeline.tracks.first().clips.first()
         assertEquals(2000L, updatedClip.trimStartMs)
         assertEquals(8000L, updatedClip.trimEndMs)
+        assertEquals(2000L, updatedClip.timelinePositionMs)
     }
 
     @Test

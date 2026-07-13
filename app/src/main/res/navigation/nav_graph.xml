@@ -45,6 +45,12 @@
         android:label="Select Media"
         tools:layout="@layout/fragment_media_import">
 
+        <argument
+            android:name="projectName"
+            app:argType="string"
+            android:defaultValue="@null"
+            app:nullable="true" />
+
         <action
             android:id="@+id/action_mediaImportFragmentToProjectDetailFragment"
             app:destination="@id/projectDetailFragment"

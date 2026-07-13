@@ -18,6 +18,9 @@ import com.beatsandbeyond.video_editor.feature.home.model.HomeUiState
 import com.beatsandbeyond.video_editor.ui.base.BaseFragment
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.textfield.TextInputLayout
+import com.google.android.material.textfield.TextInputEditText
 
 /**
  * The app's entry point — displays the project grid or empty state.
@@ -78,10 +81,10 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>() {
 
     private fun setupClickListeners() {
         binding.btnNewProject.setOnClickListener {
-            findNavController().navigate(R.id.action_homeFragment_to_mediaImportFragment)
+            showCreateProjectDialog()
         }
         binding.fabNewProject.setOnClickListener {
-            findNavController().navigate(R.id.action_homeFragment_to_mediaImportFragment)
+            showCreateProjectDialog()
         }
     }
 
@@ -138,6 +141,44 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>() {
             }
             .setNegativeButton(getString(R.string.btn_cancel), null)
             .show()
+    }
+
+    private fun showCreateProjectDialog() {
+        val defaultName = generateDefaultProjectName()
+        
+        val dialogView = LayoutInflater.from(requireContext())
+            .inflate(R.layout.dialog_create_project, null)
+        val tilProjectName = dialogView.findViewById<TextInputLayout>(R.id.tilProjectName)
+        val etProjectName = dialogView.findViewById<TextInputEditText>(R.id.etProjectName)
+        
+        etProjectName.setText(defaultName)
+        etProjectName.selectAll()
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(getString(R.string.dialog_new_project_title))
+            .setView(dialogView)
+            .setPositiveButton(getString(R.string.btn_next), null)
+            .setNegativeButton(getString(R.string.btn_cancel), null)
+            .create()
+
+        dialog.show()
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val enteredName = etProjectName.text?.toString()?.trim()
+            if (enteredName.isNullOrEmpty()) {
+                tilProjectName.error = getString(R.string.dialog_new_project_error_empty)
+            } else {
+                dialog.dismiss()
+                val action = HomeFragmentDirections
+                    .actionHomeFragmentToMediaImportFragment(enteredName)
+                findNavController().navigate(action)
+            }
+        }
+    }
+
+    private fun generateDefaultProjectName(): String {
+        val formatter = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
+        return "Project — ${formatter.format(java.util.Date())}"
     }
 
     companion object {

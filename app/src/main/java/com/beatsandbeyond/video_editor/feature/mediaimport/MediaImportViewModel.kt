@@ -1,6 +1,7 @@
 package com.beatsandbeyond.video_editor.feature.mediaimport
 
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.SavedStateHandle
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.model.MediaFilter
 import com.beatsandbeyond.video_editor.core.domain.model.MediaItem
@@ -35,6 +36,7 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class MediaImportViewModel @Inject constructor(
+    private val savedStateHandle: SavedStateHandle,
     private val getMediaItemsUseCase: GetMediaItemsUseCase,
     private val createProjectUseCase: CreateProjectUseCase,
     private val importAssetsUseCase: ImportAssetsUseCase,
@@ -139,7 +141,7 @@ class MediaImportViewModel @Inject constructor(
             }
 
             // Step 1: Create the project skeleton
-            val projectName = generateDefaultProjectName()
+            val projectName = savedStateHandle.get<String>("projectName") ?: generateDefaultProjectName()
             val createResult = createProjectUseCase(name = projectName)
 
             when (createResult) {

@@ -374,8 +374,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         binding.timelineRuler.setPixelsPerMs(pixelsPerMs)
         binding.timelineRuler.setViewportWidth(binding.timelineHorizontalScroll.width)
 
-        // Clear previous lanes
-        binding.videoTrackLane.removeAllViews()
+        // Clear other lanes (audio, text, overlay remain empty in Phase 3)
         binding.audioTrackLane.removeAllViews()
         binding.textTrackLane.removeAllViews()
         binding.overlayTrackLane.removeAllViews()
@@ -386,23 +385,71 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             width = totalTimelineWidth
         }
 
-        // Render video clips
+        // Render video clips with recycling
         val videoTrack = state.project.timeline.primaryVideoTrack
-        videoTrack?.clips?.forEach { clip ->
-            val clipView = layoutInflater.inflate(R.layout.item_timeline_clip_editable, binding.videoTrackLane, false)
+        val clips = videoTrack?.clips ?: emptyList()
+        val clipIds = clips.map { it.id }.toSet()
 
-            val params = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
-                (clip.durationOnTimelineMs * pixelsPerMs).toInt(),
-                ViewGroup.LayoutParams.MATCH_PARENT
-            ).apply {
-                startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                marginStart = (clip.timelinePositionMs * pixelsPerMs).toInt()
+        // 1. Remove old/deleted clip views
+        val viewsToRemove = mutableListOf<View>()
+        for (i in 0 until binding.videoTrackLane.childCount) {
+            val child = binding.videoTrackLane.getChildAt(i)
+            val tagId = (child.tag as? ClipViewMetadata)?.clipId
+            if (tagId == null || tagId !in clipIds) {
+                viewsToRemove.add(child)
             }
-            clipView.layoutParams = params
+        }
+        viewsToRemove.forEach { binding.videoTrackLane.removeView(it) }
 
-            // Bind thumbnail & details
+        // 2. Add or update clip views
+        clips.forEach { clip ->
+            var clipView = (0 until binding.videoTrackLane.childCount)
+                .map { binding.videoTrackLane.getChildAt(it) }
+                .firstOrNull { (it.tag as? ClipViewMetadata)?.clipId == clip.id }
+
+            if (clipView == null) {
+                clipView = layoutInflater.inflate(R.layout.item_timeline_clip_editable, binding.videoTrackLane, false)
+                binding.videoTrackLane.addView(clipView)
+            }
+
+            val asset = state.assets[clip.assetId]
+            val isSelected = clip.id == state.selectedClipId
+            val newMetadata = ClipViewMetadata(
+                clipId = clip.id,
+                trimStartMs = clip.trimStartMs,
+                trimEndMs = clip.trimEndMs,
+                durationOnTimelineMs = clip.durationOnTimelineMs,
+                isSelected = isSelected,
+                assetUri = asset?.mediaUri
+            )
+
+            val currentMetadata = clipView.tag as? ClipViewMetadata
+            val needsLayoutUpdate = currentMetadata == null ||
+                    currentMetadata.clipId != newMetadata.clipId ||
+                    currentMetadata.durationOnTimelineMs != newMetadata.durationOnTimelineMs ||
+                    currentMetadata.isSelected != newMetadata.isSelected
+
+            val needsThumbnailsUpdate = currentMetadata == null ||
+                    currentMetadata.clipId != newMetadata.clipId ||
+                    currentMetadata.trimStartMs != newMetadata.trimStartMs ||
+                    currentMetadata.trimEndMs != newMetadata.trimEndMs ||
+                    currentMetadata.durationOnTimelineMs != newMetadata.durationOnTimelineMs ||
+                    currentMetadata.assetUri != newMetadata.assetUri
+
+            // Setup layout params
+            if (needsLayoutUpdate) {
+                val params = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
+                    (clip.durationOnTimelineMs * pixelsPerMs).toInt(),
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ).apply {
+                    startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                    topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                    bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
+                    marginStart = (clip.timelinePositionMs * pixelsPerMs).toInt()
+                }
+                clipView.layoutParams = params
+            }
+
             val stripContainer = clipView.findViewById<android.widget.LinearLayout>(R.id.thumbnailStripContainer)
             val nameView = clipView.findViewById<TextView>(R.id.clipName)
             val durationView = clipView.findViewById<TextView>(R.id.clipDurationText)
@@ -410,56 +457,56 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             val leftHandle = clipView.findViewById<View>(R.id.leftTrimHandle)
             val rightHandle = clipView.findViewById<View>(R.id.rightTrimHandle)
 
-            val asset = state.assets[clip.assetId]
-            if (asset != null) {
-                // Generate film strip
-                val clipWidthPx = (clip.durationOnTimelineMs * pixelsPerMs).toInt()
-                val tileWidthPx = resources.getDimensionPixelSize(R.dimen.timeline_track_height)
-                val tileCount = Math.max(1, Math.ceil(clipWidthPx.toDouble() / tileWidthPx).toInt())
-                val timeStepMs = clip.durationOnTimelineMs / tileCount
-                
-                stripContainer.removeAllViews()
-                for (i in 0 until tileCount) {
-                    val imageView = ImageView(context).apply {
-                        layoutParams = android.widget.LinearLayout.LayoutParams(tileWidthPx, ViewGroup.LayoutParams.MATCH_PARENT)
-                        scaleType = ImageView.ScaleType.CENTER_CROP
+            // Load thumbnails if needed
+            if (needsThumbnailsUpdate) {
+                if (asset != null) {
+                    val clipWidthPx = (clip.durationOnTimelineMs * pixelsPerMs).toInt()
+                    val tileWidthPx = resources.getDimensionPixelSize(R.dimen.timeline_track_height)
+                    val tileCount = Math.max(1, Math.ceil(clipWidthPx.toDouble() / tileWidthPx).toInt())
+                    val timeStepMs = clip.durationOnTimelineMs / tileCount
+                    
+                    stripContainer.removeAllViews()
+                    for (i in 0 until tileCount) {
+                        val imageView = ImageView(context).apply {
+                            layoutParams = android.widget.LinearLayout.LayoutParams(tileWidthPx, ViewGroup.LayoutParams.MATCH_PARENT)
+                            scaleType = ImageView.ScaleType.CENTER_CROP
+                        }
+                        val frameTimeMs = clip.trimStartMs + (i * timeStepMs)
+                        imageView.load(android.net.Uri.parse(asset.mediaUri)) {
+                            videoFrameMillis(frameTimeMs)
+                            crossfade(true)
+                            placeholder(R.color.color_surface_variant)
+                        }
+                        stripContainer.addView(imageView)
                     }
-                    val frameTimeMs = clip.trimStartMs + (i * timeStepMs)
-                    imageView.load(android.net.Uri.parse(asset.mediaUri)) {
-                        videoFrameMillis(frameTimeMs)
-                        crossfade(true)
-                        placeholder(R.color.color_surface_variant)
-                    }
-                    stripContainer.addView(imageView)
+                    nameView.text = asset.displayName.substringBeforeLast(".")
+                } else {
+                    nameView.text = "Unknown Clip"
                 }
-
-                nameView.text = asset.displayName.substringBeforeLast(".")
-            } else {
-                nameView.text = "Unknown Clip"
+                durationView.text = "%.1fs".format(clip.durationOnTimelineMs / 1000f)
             }
 
-            durationView.text = "%.1fs".format(clip.durationOnTimelineMs / 1000f)
+            // Bind click and touch gestures
+            if (needsLayoutUpdate) {
+                borderView.visibility = if (isSelected) View.VISIBLE else View.GONE
+                leftHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
+                rightHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
 
-            // Selected styling toggle
-            val isSelected = clip.id == state.selectedClipId
-            borderView.visibility = if (isSelected) View.VISIBLE else View.GONE
-            leftHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
-            rightHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
-
-            // Click listener for initial selection (if not selected)
-            clipView.setOnClickListener {
                 if (!isSelected) {
-                    viewModel.selectClip(clip.id)
+                    clipView.setOnClickListener {
+                        viewModel.selectClip(clip.id)
+                    }
+                    clipView.setOnTouchListener(null)
+                    leftHandle.setOnTouchListener(null)
+                    rightHandle.setOnTouchListener(null)
+                } else {
+                    clipView.setOnClickListener(null)
+                    setupTrimHandles(leftHandle, rightHandle, clip, asset?.durationMs ?: 0L)
+                    setupMoveGesture(clipView, clip)
                 }
             }
 
-            // Drag / deselect gestures
-            if (isSelected) {
-                setupTrimHandles(leftHandle, rightHandle, clip, asset?.durationMs ?: 0L)
-                setupMoveGesture(clipView, clip)
-            }
-
-            binding.videoTrackLane.addView(clipView)
+            clipView.tag = newMetadata
         }
 
         // Context Toolbar toggle
@@ -476,20 +523,22 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                 MotionEvent.ACTION_DOWN -> {
                     startTouchX = event.rawX
                     startTrimVal = clip.trimStartMs
+                    binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - startTouchX
-                    val deltaMs = (dx / pixelsPerMs).toLong()
+                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimStart = (startTrimVal + deltaMs).coerceIn(0L, clip.trimEndMs - 500L)
                     viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = false)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     val dx = event.rawX - startTouchX
-                    val deltaMs = (dx / pixelsPerMs).toLong()
+                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimStart = (startTrimVal + deltaMs).coerceIn(0L, clip.trimEndMs - 500L)
                     viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = true)
+                    binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
                 else -> false
@@ -501,20 +550,22 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                 MotionEvent.ACTION_DOWN -> {
                     startTouchX = event.rawX
                     startTrimVal = clip.trimEndMs
+                    binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - startTouchX
-                    val deltaMs = (dx / pixelsPerMs).toLong()
+                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimEnd = (startTrimVal + deltaMs).coerceIn(clip.trimStartMs + 500L, assetDurationMs)
                     viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = false)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     val dx = event.rawX - startTouchX
-                    val deltaMs = (dx / pixelsPerMs).toLong()
+                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimEnd = (startTrimVal + deltaMs).coerceIn(clip.trimStartMs + 500L, assetDurationMs)
                     viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = true)
+                    binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
                 else -> false
@@ -535,6 +586,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     startTouchX = event.rawX
                     startPositionVal = clip.timelinePositionMs
                     isDragging = false
+                    binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -559,6 +611,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         // Small touch movement with no drag = click gesture to deselect
                         viewModel.selectClip(null)
                     }
+                    binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
                 else -> false
@@ -581,3 +634,16 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         return "%02d:%02d".format(mins, secs)
     }
 }
+
+/**
+ * Metadata cache stored on a timeline clip view's tag to enable performance-optimal view recycling
+ * and prevent redundant film strip thumbnail loads.
+ */
+data class ClipViewMetadata(
+    val clipId: String,
+    val trimStartMs: Long,
+    val trimEndMs: Long,
+    val durationOnTimelineMs: Long,
+    val isSelected: Boolean,
+    val assetUri: String?
+)

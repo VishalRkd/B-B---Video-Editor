@@ -45,10 +45,11 @@
     <!-- Left Trim Handle -->
     <ImageView
         android:id="@+id/leftTrimHandle"
-        android:layout_width="@dimen/timeline_trim_handle_width"
+        android:layout_width="24dp"
         android:layout_height="match_parent"
         android:src="@drawable/ic_left_trim_handle"
         android:scaleType="fitXY"
+        android:paddingHorizontal="6dp"
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
@@ -57,10 +58,11 @@
     <!-- Right Trim Handle -->
     <ImageView
         android:id="@+id/rightTrimHandle"
-        android:layout_width="@dimen/timeline_trim_handle_width"
+        android:layout_width="24dp"
         android:layout_height="match_parent"
         android:src="@drawable/ic_right_trim_handle"
         android:scaleType="fitXY"
+        android:paddingHorizontal="6dp"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"

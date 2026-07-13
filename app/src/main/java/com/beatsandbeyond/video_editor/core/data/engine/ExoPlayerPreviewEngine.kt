@@ -116,17 +116,45 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
         withContext(dispatchers.main) {
             val exo = ensurePlayer()
+            val previousPositionMs = _currentPositionMs.value
+            val wasPlaying = exo.playWhenReady
+
             exo.setMediaItems(mediaItems)
             exo.prepare()
             
-            // Apply speed of first item if exists
-            val firstClip = clips.firstOrNull()
-            if (firstClip != null) {
-                exo.setPlaybackSpeed(firstClip.speedFactor)
+            // Find target clip and offset for current timeline position
+            var targetIndex = 0
+            var targetOffsetMs = 0L
+            for (i in clips.indices) {
+                val clip = clips[i]
+                if (previousPositionMs >= clip.timelinePositionMs && previousPositionMs <= clip.timelineEndMs) {
+                    targetIndex = i
+                    val relativeTimelineOffsetMs = previousPositionMs - clip.timelinePositionMs
+                    targetOffsetMs = (relativeTimelineOffsetMs * clip.speedFactor).toLong()
+                    break
+                }
+            }
+            
+            val activeClip = clips.getOrNull(targetIndex) ?: clips.firstOrNull()
+            if (activeClip != null) {
+                exo.setPlaybackSpeed(activeClip.speedFactor)
             }
 
-            _playbackState.value = PlaybackState.Ready
-            Logger.d(TAG, "Loaded playlist with ${mediaItems.size} clips")
+            exo.seekTo(targetIndex, targetOffsetMs)
+            _currentPositionMs.value = previousPositionMs
+
+            if (wasPlaying) {
+                exo.playWhenReady = true
+                exo.play()
+                startPositionUpdates()
+            } else {
+                exo.playWhenReady = false
+                exo.pause()
+                stopPositionUpdates()
+            }
+
+            _playbackState.value = if (wasPlaying) PlaybackState.Playing else PlaybackState.Ready
+            Logger.d(TAG, "Loaded playlist with ${mediaItems.size} clips. Restored position: $previousPositionMs ms (playing: $wasPlaying)")
         }
     }
 

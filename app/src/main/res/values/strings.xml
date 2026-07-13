@@ -68,4 +68,10 @@
     <string name="speed_1_5x">1.5×</string>
     <string name="speed_2x">2×</string>
     <string name="speed_4x">4×</string>
+
+    <!-- New Project Naming -->
+    <string name="dialog_new_project_title">New Project</string>
+    <string name="dialog_new_project_hint">Project Name</string>
+    <string name="dialog_new_project_error_empty">Project name cannot be empty</string>
+    <string name="btn_next">Next</string>
 </resources>

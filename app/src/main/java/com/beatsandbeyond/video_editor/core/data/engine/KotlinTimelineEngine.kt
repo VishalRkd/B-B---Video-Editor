@@ -36,7 +36,13 @@ class KotlinTimelineEngine @Inject constructor() : TimelineEngine {
     override fun trimClip(clip: Clip, startMs: Long, endMs: Long): Clip {
         require(startMs >= 0) { "Start must be >= 0" }
         require(endMs > startMs) { "End must be > start" }
-        return clip.copy(trimStartMs = startMs, trimEndMs = endMs)
+        val deltaStartMs = startMs - clip.trimStartMs
+        val deltaTimelineMs = (deltaStartMs / clip.speedFactor).toLong()
+        return clip.copy(
+            trimStartMs = startMs,
+            trimEndMs = endMs,
+            timelinePositionMs = clip.timelinePositionMs + deltaTimelineMs
+        )
     }
 
     override fun splitClip(clip: Clip, positionMs: Long): Pair<Clip, Clip> {
