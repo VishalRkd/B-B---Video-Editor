@@ -47,6 +47,7 @@
     <string name="editor_undo">Undo</string>
     <string name="editor_redo">Redo</string>
     <string name="editor_export">Export</string>
+    <string name="btn_export">Export</string>
 
     <!-- Context bottom toolbar -->
     <string name="editor_split">Split</string>
@@ -74,4 +75,61 @@
     <string name="dialog_new_project_hint">Project Name</string>
     <string name="dialog_new_project_error_empty">Project name cannot be empty</string>
     <string name="btn_next">Next</string>
+
+    <!-- Toasts -->
+    <string name="toast_resolution">Resolution settings: 1080P</string>
+    <string name="toast_exporting">Exporting project...</string>
+    <string name="toast_more_options">More options</string>
+    <string name="toast_volume">Volume adjustment</string>
+    <string name="toast_filters">Filters</string>
+    <string name="toast_color_adjust">Color adjustments</string>
+    <string name="toast_magnet_on">Magnetic Snap ON</string>
+    <string name="toast_magnet_off">Magnetic Snap OFF</string>
+    <string name="toast_ripple_on">Ripple Trim ON</string>
+    <string name="toast_ripple_off">Ripple Trim OFF</string>
+    <string name="toast_add_media">Add media clip</string>
+    <string name="toast_grid_options">Grid overlay options</string>
+    <string name="toast_crop_options">Crop options</string>
+    <string name="toast_aspect_ratio">Aspect ratio settings</string>
+    <string name="toast_fullscreen">Fullscreen player</string>
+    <string name="missing_asset">Missing Asset</string>
+    <string name="clip_duration_format" formatted="false">%1$.1fs</string>
+    <string name="clip_duration_speed_format" formatted="false">%1$.1fs (%2$.1fx)</string>
+
+    <!-- Phase 4: Audio -->
+    <string name="dialog_volume_title">Clip Volume</string>
+    <string name="btn_apply">Apply</string>
+    <string name="btn_add">Add</string>
+    <string name="toast_no_assets">No assets imported yet</string>
+
+    <!-- Phase 5: Text / Overlay / Filters -->
+    <string name="menu_add_audio">Add Audio</string>
+    <string name="menu_add_text">Add Text</string>
+    <string name="menu_add_overlay">Add Overlay</string>
+    <string name="dialog_add_text_title">Add Text</string>
+    <string name="hint_text_enter">Enter text…</string>
+    <string name="sheet_add_audio_title">Add Audio Track</string>
+    <string name="sheet_add_overlay_title">Add Overlay</string>
+    <string name="sheet_no_audio">No audio assets in this project</string>
+    <string name="sheet_no_overlay">No image or video assets in this project</string>
+    <string name="sheet_filter_title">Filter &amp; Adjust</string>
+    <string name="sheet_tab_filter">Filter</string>
+    <string name="sheet_tab_adjust">Adjust</string>
+    <string name="sheet_brightness">Brightness</string>
+    <string name="sheet_contrast">Contrast</string>
+    <string name="sheet_saturation">Saturation</string>
+
+    <!-- Phase 6: Export -->
+    <string name="export_config_title">Export Settings</string>
+    <string name="export_resolution_format" formatted="false">Resolution: %s</string>
+    <string name="export_quality_high">High Quality (8 Mbps)</string>
+    <string name="export_quality_medium">Medium Quality (4 Mbps)</string>
+    <string name="export_quality_low">Low Quality (2 Mbps)</string>
+    <string name="export_progress_title">Exporting…</string>
+    <string name="export_progress_preparing">Preparing export…</string>
+    <string name="export_progress_percent" formatted="false">Exporting… %d%%</string>
+    <string name="export_completed" formatted="false">Export complete: %s</string>
+    <string name="export_failed" formatted="false">Export failed: %s</string>
+    <string name="export_error_unknown">Unknown error</string>
+    <string name="export_cancelled">Export cancelled</string>
 </resources>

@@ -2,10 +2,12 @@ package com.beatsandbeyond.video_editor.feature.projectdetail
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.os.Environment
 import android.view.*
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -16,19 +18,31 @@ import coil.load
 import coil.request.videoFrameMillis
 import com.beatsandbeyond.video_editor.R
 import com.beatsandbeyond.video_editor.core.domain.model.Clip
+import com.beatsandbeyond.video_editor.core.domain.model.ExportConfig
+import com.beatsandbeyond.video_editor.core.domain.model.ExportFormat
+import com.beatsandbeyond.video_editor.core.domain.model.ExportProgress
 import com.beatsandbeyond.video_editor.core.domain.model.PlaybackState
+import com.beatsandbeyond.video_editor.core.domain.model.Resolution
+import com.beatsandbeyond.video_editor.core.domain.model.TextStyle
+import com.beatsandbeyond.video_editor.core.domain.model.TrackType
+import com.beatsandbeyond.video_editor.core.domain.model.VideoFilter
 import com.beatsandbeyond.video_editor.core.domain.model.trackTypeOf
 import com.beatsandbeyond.video_editor.databinding.FragmentProjectDetailBinding
+import com.beatsandbeyond.video_editor.feature.projectdetail.bottomsheet.AssetPickerBottomSheet
+import com.beatsandbeyond.video_editor.feature.projectdetail.bottomsheet.FilterPickerBottomSheet
 import com.beatsandbeyond.video_editor.feature.projectdetail.model.ProjectDetailUiState
 import com.beatsandbeyond.video_editor.feature.projectdetail.view.TimelineLaneController
 import com.beatsandbeyond.video_editor.ui.base.BaseFragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import androidx.appcompat.widget.PopupMenu
 import android.widget.LinearLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.content.ContextCompat
+import java.io.File
 
 @AndroidEntryPoint
 class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
@@ -83,13 +97,13 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             viewModel.redo()
         }
         binding.btnResolution.setOnClickListener {
-            Toast.makeText(context, "Resolution settings: 1080P", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_resolution), Toast.LENGTH_SHORT).show()
         }
         binding.btnExport.setOnClickListener {
-            Toast.makeText(context, "Exporting project...", Toast.LENGTH_SHORT).show()
+            showExportConfigSheet()
         }
         binding.btnMore.setOnClickListener {
-            Toast.makeText(context, "More options", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_more_options), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -139,6 +153,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                 val contentContainer = binding.timelineRuler.parent as LinearLayout
                 contentContainer.setPadding(timelinePadding, 0, timelinePadding, 0)
                 binding.timelineRuler.setViewportWidth(newWidth)
+
+                // Trigger viewport update for all controllers on layout change
+                laneControllers.values.forEach { it.updateViewport(binding.timelineHorizontalScroll.scrollX, newWidth) }
             }
         }
 
@@ -163,6 +180,10 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         }
 
         binding.timelineHorizontalScroll.setOnScrollChangeListener { _, scrollX, _, _, _ ->
+            // Update viewport for virtualization
+            val viewportWidth = binding.timelineHorizontalScroll.width
+            laneControllers.values.forEach { it.updateViewport(scrollX, viewportWidth) }
+
             val timeMs = (scrollX / pixelsPerMs).toLong()
             binding.timelineRuler.setScrollOffsetMs(timeMs)
             binding.playheadView.setPlayheadTime(timeMs)
@@ -190,25 +211,25 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     }
 
     private fun setupTrackLabels() {
-        binding.labelVideo.root.setBackgroundColor(android.graphics.Color.parseColor("#1A191C"))
+        binding.labelVideo.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_video_bg))
         binding.labelVideo.trackIcon.setImageResource(R.drawable.ic_track_video)
         binding.labelVideo.trackTitle.text = getString(R.string.filter_videos)
         binding.labelVideo.btnMute.visibility = View.GONE
         binding.labelVideo.btnLock.visibility = View.GONE
 
-        binding.labelAudio.root.setBackgroundColor(android.graphics.Color.parseColor("#0D2220"))
+        binding.labelAudio.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_audio_bg))
         binding.labelAudio.trackIcon.setImageResource(R.drawable.ic_track_audio)
         binding.labelAudio.trackTitle.text = "Audio"
         binding.labelAudio.btnMute.visibility = View.GONE
         binding.labelAudio.btnLock.visibility = View.GONE
 
-        binding.labelText.root.setBackgroundColor(android.graphics.Color.parseColor("#221C14"))
+        binding.labelText.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_text_bg))
         binding.labelText.trackIcon.setImageResource(R.drawable.ic_track_text)
         binding.labelText.trackTitle.text = "Text"
         binding.labelText.btnMute.visibility = View.GONE
         binding.labelText.btnLock.visibility = View.GONE
 
-        binding.labelOverlay.root.setBackgroundColor(android.graphics.Color.parseColor("#1C1422"))
+        binding.labelOverlay.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_overlay_bg))
         binding.labelOverlay.trackIcon.setImageResource(R.drawable.ic_track_overlay)
         binding.labelOverlay.trackTitle.text = "Overlay"
         binding.labelOverlay.btnMute.visibility = View.GONE
@@ -229,13 +250,13 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             // Trim handles are directly draggable on the clip card.
         }
         binding.contextToolbar.btnVolume.setOnClickListener {
-            Toast.makeText(context, "Volume adjustment", Toast.LENGTH_SHORT).show()
+            showVolumeDialog()
         }
         binding.contextToolbar.btnFilter.setOnClickListener {
-            Toast.makeText(context, "Filters", Toast.LENGTH_SHORT).show()
+            showFilterPickerSheet()
         }
         binding.contextToolbar.btnAdjust.setOnClickListener {
-            Toast.makeText(context, "Color adjustments", Toast.LENGTH_SHORT).show()
+            showFilterPickerSheet(initialTab = FilterPickerBottomSheet.Tab.ADJUST)
         }
     }
 
@@ -271,7 +292,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             )
             Toast.makeText(
                 context,
-                if (isMagnetEnabled) "Magnetic Snap ON" else "Magnetic Snap OFF",
+                if (isMagnetEnabled) getString(R.string.toast_magnet_on) else getString(R.string.toast_magnet_off),
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -289,24 +310,24 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             )
             Toast.makeText(
                 context,
-                if (isRippleEnabled) "Ripple Trim ON" else "Ripple Trim OFF",
+                if (isRippleEnabled) getString(R.string.toast_ripple_on) else getString(R.string.toast_ripple_off),
                 Toast.LENGTH_SHORT
             ).show()
         }
-        binding.btnMidAdd.setOnClickListener {
-            Toast.makeText(context, "Add media clip", Toast.LENGTH_SHORT).show()
+        binding.btnMidAdd.setOnClickListener { view ->
+            showAddMediaMenu(view)
         }
         binding.btnOverlayGrid.setOnClickListener {
-            Toast.makeText(context, "Grid overlay options", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_grid_options), Toast.LENGTH_SHORT).show()
         }
         binding.btnOverlayCrop.setOnClickListener {
-            Toast.makeText(context, "Crop options", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_crop_options), Toast.LENGTH_SHORT).show()
         }
         binding.btnOverlayAspect.setOnClickListener {
-            Toast.makeText(context, "Aspect ratio settings", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_aspect_ratio), Toast.LENGTH_SHORT).show()
         }
         binding.btnOverlayExpand.setOnClickListener {
-            Toast.makeText(context, "Fullscreen player", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, getString(R.string.toast_fullscreen), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -340,6 +361,247 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             .show()
     }
 
+    // ── Phase 4: Volume dialog ───────────────────────────────────────────────
+
+    private fun showVolumeDialog() {
+        val clip = viewModel.getSelectedClip() ?: return
+        var volume = clip.volume
+
+        val slider = com.google.android.material.slider.Slider(requireContext()).apply {
+            valueFrom = 0f
+            valueTo = 2f
+            stepSize = 0.05f
+            value = volume
+            setLabelFormatter { "%.0f%%".format(it * 100) }
+        }
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.dialog_volume_title)
+            .setView(slider)
+            .setPositiveButton(R.string.btn_apply) { _, _ ->
+                viewModel.setSelectedClipVolume(slider.value)
+            }
+            .setNegativeButton(R.string.btn_cancel, null)
+            .show()
+    }
+
+    // ── Add-media menu (audio / text / overlay) ─────────────────────────────
+
+    private fun showAddMediaMenu(anchor: View) {
+        val popup = PopupMenu(requireContext(), anchor)
+        popup.menuInflater.inflate(R.menu.menu_add_media, popup.menu)
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.add_audio -> {
+                    showAssetPicker(AssetPickerBottomSheet.Mode.AUDIO)
+                    true
+                }
+                R.id.add_text -> {
+                    showAddTextDialog()
+                    true
+                }
+                R.id.add_overlay -> {
+                    showAssetPicker(AssetPickerBottomSheet.Mode.OVERLAY)
+                    true
+                }
+                else -> false
+            }
+        }
+        popup.show()
+    }
+
+    private fun showAssetPicker(mode: AssetPickerBottomSheet.Mode) {
+        val content = viewModel.uiState.value as? ProjectDetailUiState.Content
+        val assetIds = content?.assets?.values?.map { it.id }.orEmpty()
+        if (assetIds.isEmpty()) {
+            Toast.makeText(context, getString(R.string.toast_no_assets), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val sheet = AssetPickerBottomSheet.newInstance(mode, assetIds)
+        sheet.assetResolver = { id -> viewModel.getAsset(id) }
+        sheet.onAssetPicked = { assetId ->
+            viewModel.getAsset(assetId)?.let { asset ->
+                when (mode) {
+                    AssetPickerBottomSheet.Mode.AUDIO -> viewModel.addAudioClip(asset)
+                    AssetPickerBottomSheet.Mode.OVERLAY -> viewModel.addOverlayClip(asset)
+                }
+            }
+        }
+        sheet.show(childFragmentManager, AssetPickerBottomSheet::class.java.simpleName)
+    }
+
+    private fun showAddTextDialog() {
+        val editText = android.widget.EditText(requireContext()).apply {
+            hint = getString(R.string.hint_text_enter)
+            setPadding(
+                resources.getDimensionPixelSize(R.dimen.spacing_md),
+                resources.getDimensionPixelSize(R.dimen.spacing_md),
+                resources.getDimensionPixelSize(R.dimen.spacing_md),
+                resources.getDimensionPixelSize(R.dimen.spacing_md),
+            )
+        }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.dialog_add_text_title)
+            .setView(editText)
+            .setPositiveButton(R.string.btn_add) { _, _ ->
+                val text = editText.text?.toString()?.trim().orEmpty()
+                if (text.isNotEmpty()) {
+                    viewModel.addTextClip(
+                        TextStyle(text = text, fontSize = 48f, color = 0xFFFFFFFF.toInt())
+                    )
+                }
+            }
+            .setNegativeButton(R.string.btn_cancel, null)
+            .show()
+    }
+
+    // ── Phase 5: Filter picker ──────────────────────────────────────────────
+
+    private fun showFilterPickerSheet(initialTab: FilterPickerBottomSheet.Tab = FilterPickerBottomSheet.Tab.FILTER) {
+        val clip = viewModel.getSelectedClip() ?: return
+        val sheet = FilterPickerBottomSheet.newInstance(clip.id, clip.filter, initialTab)
+        sheet.onFilterSelected = { filter ->
+            viewModel.applyFilterToSelectedClip(filter)
+        }
+        sheet.show(childFragmentManager, FilterPickerBottomSheet::class.java.simpleName)
+    }
+
+    private fun showExportConfigSheet() {
+        val resolutions = arrayOf(
+            Resolution.FHD,
+            Resolution.HD,
+            Resolution.SQUARE,
+            Resolution.PORTRAIT_9_16,
+            Resolution.UHD_4K,
+        )
+        val qualityLabels = arrayOf(
+            getString(R.string.export_quality_high),
+            getString(R.string.export_quality_medium),
+            getString(R.string.export_quality_low),
+        )
+        val qualityBitrates = intArrayOf(8_000_000, 4_000_000, 2_000_000)
+        var selectedResolution = Resolution.FHD
+        var selectedQuality = 0
+
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.export_config_title)
+            .setSingleChoiceItems(qualityLabels, selectedQuality) { _, which -> selectedQuality = which }
+            .setPositiveButton(R.string.btn_export) { _, _ ->
+                val config = ExportConfig(
+                    outputPath = createExportOutputPath(),
+                    resolution = selectedResolution,
+                    frameRate = 30.0f,
+                    videoBitrateBps = qualityBitrates[selectedQuality],
+                    audioBitrateBps = 192_000,
+                    format = ExportFormat.MP4,
+                )
+                viewModel.startExport(config)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+
+        // Resolution is chosen via a secondary control row.
+        val resolutionNames = resolutions.map { it.toString() }.toTypedArray()
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.export_config_title)
+            .setSingleChoiceItems(resolutionNames, resolutions.indexOf(selectedResolution)) { d, which ->
+                selectedResolution = resolutions[which]
+                d.dismiss()
+                showExportConfigSheetWithSelection(selectedResolution)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+        dialog.dismiss()
+    }
+
+    private fun showExportConfigSheetWithSelection(resolution: Resolution) {
+        val qualityLabels = arrayOf(
+            getString(R.string.export_quality_high),
+            getString(R.string.export_quality_medium),
+            getString(R.string.export_quality_low),
+        )
+        val qualityBitrates = intArrayOf(8_000_000, 4_000_000, 2_000_000)
+        var selectedQuality = 0
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.export_config_title)
+            .setMessage(getString(R.string.export_resolution_format, resolution.toString()))
+            .setSingleChoiceItems(qualityLabels, selectedQuality) { _, which -> selectedQuality = which }
+            .setPositiveButton(R.string.btn_export) { _, _ ->
+                val config = ExportConfig(
+                    outputPath = createExportOutputPath(),
+                    resolution = resolution,
+                    frameRate = 30.0f,
+                    videoBitrateBps = qualityBitrates[selectedQuality],
+                    audioBitrateBps = 192_000,
+                    format = ExportFormat.MP4,
+                )
+                viewModel.startExport(config)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun createExportOutputPath(): String {
+        val dir = requireContext().getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            ?: requireContext().filesDir
+        val fileName = "bb_export_${System.currentTimeMillis()}.mp4"
+        return File(dir, fileName).absolutePath
+    }
+
+    private var exportProgressDialog: AlertDialog? = null
+
+    private fun renderExportProgress(progress: ExportProgress) {
+        when (progress) {
+            is ExportProgress.Started -> {
+                exportProgressDialog?.dismiss()
+                exportProgressDialog = MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.export_progress_title)
+                    .setMessage(R.string.export_progress_preparing)
+                    .setNegativeButton(R.string.btn_cancel) { _, _ -> viewModel.cancelExport() }
+                    .setCancelable(false)
+                    .create()
+                exportProgressDialog?.show()
+            }
+            is ExportProgress.InProgress -> {
+                if (exportProgressDialog?.isShowing != true) {
+                    exportProgressDialog = MaterialAlertDialogBuilder(requireContext())
+                        .setTitle(R.string.export_progress_title)
+                        .setNegativeButton(R.string.btn_cancel) { _, _ -> viewModel.cancelExport() }
+                        .setCancelable(false)
+                        .create()
+                    exportProgressDialog?.show()
+                }
+                exportProgressDialog?.setMessage(
+                    getString(R.string.export_progress_percent, (progress.progressFraction * 100).toInt()),
+                )
+            }
+            is ExportProgress.Completed -> {
+                exportProgressDialog?.dismiss()
+                exportProgressDialog = null
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.export_completed, progress.outputPath),
+                    Snackbar.LENGTH_LONG,
+                ).show()
+            }
+            is ExportProgress.Failed -> {
+                exportProgressDialog?.dismiss()
+                exportProgressDialog = null
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.export_failed, progress.cause.message ?: getString(R.string.export_error_unknown)),
+                    Snackbar.LENGTH_LONG,
+                ).show()
+            }
+            is ExportProgress.Cancelled -> {
+                exportProgressDialog?.dismiss()
+                exportProgressDialog = null
+                Snackbar.make(binding.root, R.string.export_cancelled, Snackbar.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // ── State observation ─────────────────────────────────────────────────────
 
     private fun observeUiState() {
@@ -347,6 +609,22 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.uiState.collect { state ->
                     renderState(state)
+                }
+            }
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.waveforms.collect { waveforms ->
+                    laneControllers[TrackType.AUDIO]?.updateWaveforms(waveforms)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.exportProgress.collect { progress ->
+                    renderExportProgress(progress)
                 }
             }
         }
@@ -391,12 +669,12 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         // Update timecode text badge
         binding.txtOverlayTimecode.text = "${formatTime(state.currentPositionMs)} / ${formatTime(state.totalDurationMs)}"
 
-        // Sync scroll view position from ExoPlayer progress ticks (only when user is not scrubbing)
+        // Sync scroll + playhead from playback position (only when the user isn't scrubbing).
+        // Done on every position tick — playing OR paused — so seeking while paused also
+        // scrolls the timeline and updates the (centered) playhead timecode.
         if (!isUserScrolling) {
             val targetScrollX = (state.currentPositionMs * pixelsPerMs).toInt()
-            if (state.isPlaying) {
-                binding.timelineHorizontalScroll.scrollTo(targetScrollX, 0)
-            }
+            binding.timelineHorizontalScroll.scrollTo(targetScrollX, 0)
             binding.playheadView.setPlayheadTime(state.currentPositionMs)
         }
 
@@ -449,7 +727,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         onClipClick = { clipId -> viewModel.selectClip(clipId) },
                         onClipLongClick = { clipId -> viewModel.toggleClipSelection(clipId) },
                         trackType = track.type,
-                    )
+                    ).apply {
+                        updateViewport(binding.timelineHorizontalScroll.scrollX, binding.timelineHorizontalScroll.width)
+                    }
                 }
                 controller.render(track, state.selectedClipIds)
             }
@@ -506,10 +786,14 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
-                    val newTrimStart = (startTrimStart + deltaMs).coerceIn(0L, startTrimEnd - 500L)
+                    val maxStart = (startTrimEnd - 500L).coerceAtLeast(0L)
+                    val newTrimStart = (startTrimStart + deltaMs).coerceIn(0L, maxStart)
+                    // New timeline duration = (new window) / speed. Trimming the left edge
+                    // INWARD must SHRINK the clip, not grow it.
+                    val newDuration = ((startTrimEnd - newTrimStart) / live.speedFactor).toLong()
                     // Direct view manipulation — no StateFlow round-trip, no thumbnail reload.
                     laneControllers[stateTrackType(clip.id)]?.setClipBounds(
-                        clip.id, live.timelinePositionMs, newTrimStart - live.trimStartMs + live.durationOnTimelineMs
+                        clip.id, live.timelinePositionMs, newDuration
                     )
                     // Lightweight commit for preview seek only (no full re-render).
                     viewModel.trimSelectedClip(newTrimStart, startTrimEnd, isFinal = false, ripple = isRippleEnabled)
@@ -519,7 +803,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
-                    val newTrimStart = (startTrimStart + deltaMs).coerceIn(0L, startTrimEnd - 500L)
+                    val maxStart = (startTrimEnd - 500L).coerceAtLeast(0L)
+                    val newTrimStart = (startTrimStart + deltaMs).coerceIn(0L, maxStart)
                     viewModel.trimSelectedClip(newTrimStart, startTrimEnd, isFinal = true, ripple = isRippleEnabled)
                     isGestureActive = false
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
@@ -544,9 +829,13 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
-                    val newTrimEnd = (startTrimEnd + deltaMs).coerceIn(startTrimStart + 500L, assetDurationMs)
+                    val minEnd = startTrimStart + 500L
+                    val maxEnd = if (assetDurationMs > 0) assetDurationMs else Long.MAX_VALUE
+                    val newTrimEnd = (startTrimEnd + deltaMs).coerceIn(minEnd, maxEnd)
+                    // New timeline duration = (new window) / speed.
+                    val newDuration = ((newTrimEnd - startTrimStart) / live.speedFactor).toLong()
                     laneControllers[stateTrackType(clip.id)]?.setClipBounds(
-                        clip.id, live.timelinePositionMs, newTrimEnd - live.trimStartMs
+                        clip.id, live.timelinePositionMs, newDuration
                     )
                     viewModel.trimSelectedClip(startTrimStart, newTrimEnd, isFinal = false, ripple = isRippleEnabled)
                     true
@@ -555,7 +844,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
-                    val newTrimEnd = (startTrimEnd + deltaMs).coerceIn(startTrimStart + 500L, assetDurationMs)
+                    val minEnd = startTrimStart + 500L
+                    val maxEnd = if (assetDurationMs > 0) assetDurationMs else Long.MAX_VALUE
+                    val newTrimEnd = (startTrimEnd + deltaMs).coerceIn(minEnd, maxEnd)
                     viewModel.trimSelectedClip(startTrimStart, newTrimEnd, isFinal = true, ripple = isRippleEnabled)
                     isGestureActive = false
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
@@ -571,6 +862,12 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         var startTouchX = 0f
         var startPositionVal = 0L
         var lastDeltaMs = 0L
+        // Base timeline positions of every selected clip, captured ONCE at ACTION_DOWN.
+        // We drive the view from these absolute anchors (base + snappedDelta) instead of
+        // re-reading getClip() mid-drag — because moveSelectedClips(isFinal=false) mutates
+        // currentProject, so a re-read would return the already-moved position and
+        // double-apply the delta, making clips jump away from the finger.
+        var basePositions: Map<String, Long> = emptyMap()
         val touchSlop = ViewConfiguration.get(clipView.context).scaledTouchSlop
         var isDragging = false
 
@@ -584,6 +881,14 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     isDragging = false
                     isGestureActive = true
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
+                    val state = viewModel.uiState.value
+                    basePositions = if (state is ProjectDetailUiState.Content) {
+                        state.selectedClipIds.associateWith { id ->
+                            viewModel.getClip(id)?.timelinePositionMs ?: 0L
+                        }
+                    } else {
+                        emptyMap()
+                    }
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -597,16 +902,18 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                             (startPositionVal + rawDeltaMs).coerceAtLeast(0L),
                             clip.id
                         )
+                        updateSnapIndicator(snappedTarget, (startPositionVal + rawDeltaMs))
                         val snappedDelta = snappedTarget - startPositionVal
                         val appliedDelta = snappedDelta - lastDeltaMs
                         if (appliedDelta != 0L) {
                             // Direct view manipulation for ALL selected clips (group drag).
+                            // Drive from captured base positions + absolute snapped target.
                             val state = viewModel.uiState.value
                             if (state is ProjectDetailUiState.Content) {
                                 state.selectedClipIds.forEach { id ->
-                                    val c = viewModel.getClip(id) ?: return@forEach
+                                    val base = basePositions[id] ?: return@forEach
                                     laneControllers[state.project.timeline.trackTypeOf(id)]?.setClipPosition(
-                                        id, c.timelinePositionMs + appliedDelta
+                                        id, base + snappedDelta
                                     )
                                 }
                             }
@@ -617,6 +924,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    binding.snapIndicator.visibility = View.GONE
                     if (isDragging) {
                         if (lastDeltaMs != 0L) {
                             viewModel.moveSelectedClips(lastDeltaMs, isFinal = true)
@@ -625,6 +933,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         viewModel.selectClip(null)
                     }
                     isGestureActive = false
+                    basePositions = emptyMap()
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
@@ -694,5 +1003,20 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             }
         }
         return best
+    }
+
+    private fun updateSnapIndicator(snappedMs: Long, rawMs: Long) {
+        val isSnapped = kotlin.math.abs(snappedMs - rawMs) < snapThresholdMs && isMagnetEnabled
+        if (isSnapped) {
+            val scrollX = binding.timelineHorizontalScroll.scrollX
+            val snappedX = (snappedMs * pixelsPerMs).toInt()
+            val labelWidth = resources.getDimensionPixelSize(R.dimen.timeline_track_label_width)
+            val relativeX = labelWidth + (snappedX - scrollX + timelinePadding)
+            
+            binding.snapIndicator.translationX = relativeX.toFloat()
+            binding.snapIndicator.visibility = View.VISIBLE
+        } else {
+            binding.snapIndicator.visibility = View.GONE
+        }
     }
 }

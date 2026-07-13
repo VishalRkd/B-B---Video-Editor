@@ -59,7 +59,8 @@ class TrimClipUseCaseTest {
         val updatedClip = updatedProject.timeline.tracks.first().clips.first()
         assertEquals(2000L, updatedClip.trimStartMs)
         assertEquals(8000L, updatedClip.trimEndMs)
-        assertEquals(2000L, updatedClip.timelinePositionMs)
+        // Right-edge-anchored trim: the clip stays at its timeline position (0).
+        assertEquals(0L, updatedClip.timelinePositionMs)
     }
 
     @Test

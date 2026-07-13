@@ -38,13 +38,15 @@ class RippleTrimUseCase @Inject constructor(
             return AppResult.Success(project)
         }
 
-        // Shift every clip that starts at or after the trimmed clip's end.
+        // Shift every clip that starts strictly AFTER the trimmed clip, so later
+        // clips stay attached to the trimmed clip's (possibly moved) right edge.
+        // The trimmed clip itself is never re-shifted here.
         val updatedTracks = project.timeline.tracks.map { t ->
             if (t.id != track.id) return@map t
             val updatedClips = t.clips.map { c ->
                 if (c.id == clipId) {
                     trimmed
-                } else if (c.timelinePositionMs >= clip.timelineEndMs) {
+                } else if (c.timelinePositionMs > clip.timelinePositionMs) {
                     c.copy(timelinePositionMs = (c.timelinePositionMs + delta).coerceAtLeast(0L))
                 } else c
             }.sortedBy { it.timelinePositionMs }

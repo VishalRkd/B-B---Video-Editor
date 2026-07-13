@@ -3,6 +3,7 @@ package com.beatsandbeyond.video_editor.feature.home
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.DeleteProjectUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.GetAllProjectsUseCase
+import com.beatsandbeyond.video_editor.core.utils.Logger
 import com.beatsandbeyond.video_editor.feature.home.model.HomeUiState
 import com.beatsandbeyond.video_editor.ui.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,9 +31,10 @@ class HomeViewModel @Inject constructor(
         loadProjects()
     }
 
-    private fun loadProjects() {
+    fun loadProjects() {
         launchSafely {
             getAllProjectsUseCase().collect { result ->
+                Logger.d(tag, "Projects flow emitted: $result")
                 _uiState.value = when (result) {
                     is AppResult.Loading -> HomeUiState.Loading
                     is AppResult.Success -> {

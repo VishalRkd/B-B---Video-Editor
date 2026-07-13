@@ -55,4 +55,29 @@
     <!-- Semi-transparent dark scrim for loading overlays -->
     <color name="color_scrim">#CC0D0C0E</color>
 
+    <!-- ── Timeline Track Colors ─────────────────────────────────────────── -->
+    <!-- Video track: use surface colors -->
+    <color name="color_track_video_bg">#1A1920</color>
+    <color name="color_track_video_border">#FFAF3F</color>
+
+    <!-- Audio track: teal -->
+    <color name="color_track_audio_bg">#0D2E28</color>
+    <color name="color_track_audio_waveform">#00D4AA</color>
+
+    <!-- Text track: warm brown/amber -->
+    <color name="color_track_text_bg">#2E1F00</color>
+    <color name="color_track_text_accent">#B8761F</color>
+
+    <!-- Overlay track: purple -->
+    <color name="color_track_overlay_bg">#1A1033</color>
+    <color name="color_track_overlay_accent">#A97CFF</color>
+
+    <!-- Effect track: teal/cyan -->
+    <color name="color_track_effect_bg">#001E2E</color>
+    <color name="color_track_effect_accent">#00B4D8</color>
+
+    <!-- Adjustment track: dark teal -->
+    <color name="color_track_adjustment_bg">#0A1E1E</color>
+    <color name="color_track_adjustment_accent">#00856F</color>
+
 </resources>

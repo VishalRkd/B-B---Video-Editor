@@ -532,7 +532,18 @@
 
     </LinearLayout>
 
-    <!-- Centered Playhead Line Overlay (Constrained to timelineSection to prevent layout height measurement cycles) -->
+    <!-- Snap Indicator (Vertical line shown during magnetic snapping) -->
+    <View
+        android:id="@+id/snapIndicator"
+        android:layout_width="1dp"
+        android:layout_height="0dp"
+        android:background="@color/color_primary"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/timelineSection"
+        app:layout_constraintBottom_toBottomOf="@id/timelineSection"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- Centered Playhead Line Overlay -->
     <com.beatsandbeyond.video_editor.feature.projectdetail.view.PlayheadView
         android:id="@+id/playheadView"
         android:layout_width="0dp"

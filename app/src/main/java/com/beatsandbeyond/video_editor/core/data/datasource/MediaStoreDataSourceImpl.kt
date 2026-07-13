@@ -10,8 +10,8 @@ import com.beatsandbeyond.video_editor.core.domain.model.MediaFilter
 import com.beatsandbeyond.video_editor.core.domain.model.MediaItem
 import com.beatsandbeyond.video_editor.core.domain.model.MediaType
 import com.beatsandbeyond.video_editor.core.domain.model.SortOrder
+import com.beatsandbeyond.video_editor.core.utils.CoroutineDispatchers
 import com.beatsandbeyond.video_editor.core.utils.Logger
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -26,6 +26,7 @@ import javax.inject.Inject
  */
 class MediaStoreDataSourceImpl @Inject constructor(
     private val contentResolver: ContentResolver,
+    private val dispatchers: CoroutineDispatchers,
 ) : MediaStoreDataSource {
 
     companion object {
@@ -33,7 +34,7 @@ class MediaStoreDataSourceImpl @Inject constructor(
     }
 
     override suspend fun queryMedia(filter: MediaFilter): List<MediaItem> =
-        withContext(Dispatchers.IO) {
+        withContext(dispatchers.io) {
             val results = mutableListOf<MediaItem>()
 
             if (MediaType.VIDEO in filter.mediaTypes) {
@@ -47,7 +48,7 @@ class MediaStoreDataSourceImpl @Inject constructor(
         }
 
     override suspend fun queryMediaById(id: Long): MediaItem? =
-        withContext(Dispatchers.IO) {
+        withContext(dispatchers.io) {
             // Try video first, then image
             queryVideoById(id) ?: queryImageById(id)
         }

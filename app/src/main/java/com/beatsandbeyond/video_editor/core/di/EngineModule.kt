@@ -3,9 +3,13 @@ package com.beatsandbeyond.video_editor.core.di
 import com.beatsandbeyond.video_editor.core.data.engine.ExoPlayerPreviewEngine
 import com.beatsandbeyond.video_editor.core.data.engine.KotlinTimelineEngine
 import com.beatsandbeyond.video_editor.core.data.engine.AndroidMediaEngine
+import com.beatsandbeyond.video_editor.core.data.engine.AndroidAudioEngine
+import com.beatsandbeyond.video_editor.core.data.engine.MediaCodecExportEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.PreviewEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.TimelineEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.MediaEngine
+import com.beatsandbeyond.video_editor.core.domain.engine.AudioEngine
+import com.beatsandbeyond.video_editor.core.domain.engine.ExportEngine
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -36,4 +40,16 @@ abstract class EngineModule {
     abstract fun bindMediaEngine(
         impl: AndroidMediaEngine,
     ): MediaEngine
+
+    @Binds
+    @Singleton
+    abstract fun bindAudioEngine(
+        impl: AndroidAudioEngine,
+    ): AudioEngine
+
+    @Binds
+    @Singleton
+    abstract fun bindExportEngine(
+        impl: MediaCodecExportEngine,
+    ): ExportEngine
 }

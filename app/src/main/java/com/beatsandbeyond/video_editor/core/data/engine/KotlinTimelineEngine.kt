@@ -36,12 +36,12 @@ class KotlinTimelineEngine @Inject constructor() : TimelineEngine {
     override fun trimClip(clip: Clip, startMs: Long, endMs: Long): Clip {
         require(startMs >= 0) { "Start must be >= 0" }
         require(endMs > startMs) { "End must be > start" }
-        val deltaStartMs = startMs - clip.trimStartMs
-        val deltaTimelineMs = (deltaStartMs / clip.speedFactor).toLong()
+        // The clip stays anchored at its current timeline position; only the source
+        // trim window changes. (Left-edge trims do NOT slide the clip forward — the
+        // right edge stays put, matching CapCut-style editing.)
         return clip.copy(
             trimStartMs = startMs,
             trimEndMs = endMs,
-            timelinePositionMs = clip.timelinePositionMs + deltaTimelineMs
         )
     }
 

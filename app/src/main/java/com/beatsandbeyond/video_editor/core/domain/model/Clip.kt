@@ -24,6 +24,10 @@ data class Clip(
     val speedFactor: Float = 1.0f,
     val volume: Float = 1.0f,
     val effects: List<Effect> = emptyList(),
+    /** Non-null only for clips on the [TrackType.TEXT] track. */
+    val textStyle: TextStyle? = null,
+    /** Visual filter applied to this clip (Phase 5). [VideoFilter.None] means no filter. */
+    val filter: VideoFilter = VideoFilter.None,
 ) {
     /**
      * The duration of this clip on the timeline, accounting for speed.

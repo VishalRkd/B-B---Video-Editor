@@ -4,9 +4,17 @@ import android.view.Surface
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.beatsandbeyond.video_editor.core.common.AppResult
+import com.beatsandbeyond.video_editor.core.common.onSuccess
+import com.beatsandbeyond.video_editor.core.domain.engine.AudioEngine
+import com.beatsandbeyond.video_editor.core.domain.engine.ExportEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.PreviewEngine
 import com.beatsandbeyond.video_editor.core.domain.model.*
 import com.beatsandbeyond.video_editor.core.domain.usecase.asset.GetAssetsByProjectIdUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.audio.AddAudioTrackUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.audio.SetClipVolumeUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddOverlayClipUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddTextClipUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.effects.ApplyFilterUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.GetProjectByIdUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.UpdateProjectUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.timeline.*
@@ -15,6 +23,7 @@ import com.beatsandbeyond.video_editor.ui.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.BufferOverflow
 import java.util.UUID
 import javax.inject.Inject
 
@@ -41,13 +50,35 @@ class ProjectDetailViewModel @Inject constructor(
     private val moveClipsUseCase: MoveClipsUseCase,
     private val rippleTrimUseCase: RippleTrimUseCase,
     private val setSpeedUseCase: SetSpeedUseCase,
+    private val addAudioTrackUseCase: AddAudioTrackUseCase,
+    private val setClipVolumeUseCase: SetClipVolumeUseCase,
+    private val addTextClipUseCase: AddTextClipUseCase,
+    private val addOverlayClipUseCase: AddOverlayClipUseCase,
+    private val applyFilterUseCase: ApplyFilterUseCase,
+    private val audioEngine: AudioEngine,
+    private val exportEngine: ExportEngine,
 ) : BaseViewModel() {
+
+    private val _waveforms = MutableStateFlow<Map<String, FloatArray>>(emptyMap())
+    val waveforms: StateFlow<Map<String, FloatArray>> = _waveforms.asStateFlow()
+
+    /** One-shot export progress events for the UI to render. */
+    private val _exportProgress = MutableSharedFlow<ExportProgress>(
+        extraBufferCapacity = 8,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val exportProgress: SharedFlow<ExportProgress> = _exportProgress.asSharedFlow()
 
     private val _uiState = MutableStateFlow<ProjectDetailUiState>(ProjectDetailUiState.Loading)
     val uiState: StateFlow<ProjectDetailUiState> = _uiState.asStateFlow()
 
     private var editingHistory = EditingHistory()
     private var currentProject: Project? = null
+    // Snapshot of the project BEFORE a drag edit began. Drag edits mutate currentProject on
+    // every isFinal=false frame, so by the time isFinal=true commits, currentProject already
+    // equals the final state. We capture the pre-edit baseline on the first drag frame and use
+    // it as the undo history entry, otherwise undo would be a no-op (push(final, final)).
+    private var preEditProject: Project? = null
     private var assetsMap: Map<String, Asset> = emptyMap()
 
     private val currentContent: ProjectDetailUiState.Content?
@@ -222,8 +253,12 @@ class ProjectDetailViewModel @Inject constructor(
                         updatedClip?.timelineEndMs ?: 0L
                     }
 
+                    // Use the pre-drag snapshot as the undo baseline (see preEditProject docs).
+                    val baseline = preEditProject ?: project
+                    preEditProject = null
+
                     launchSafely {
-                        editingHistory = editingHistory.push(project, updatedProject)
+                        editingHistory = editingHistory.push(baseline, updatedProject)
                         updateProjectUseCase(updatedProject) // auto-save to Room
                         currentProject = updatedProject
                         refreshContent(updatedProject, content.selectedClipId)
@@ -231,6 +266,7 @@ class ProjectDetailViewModel @Inject constructor(
                         previewEngine.seekTo(targetTimelinePos)
                     }
                 } else {
+                    if (preEditProject == null) preEditProject = project
                     currentProject = result.data
                     // IMPORTANT: do NOT call refreshContent() here. Emitting a new StateFlow mid-gesture
                     // triggers renderTracks() -> rebindSelectedClipGestures(), which replaces the trim
@@ -251,7 +287,7 @@ class ProjectDetailViewModel @Inject constructor(
                     _uiState.value = ProjectDetailUiState.Error(result.exception.message ?: "Trim failed")
                 }
             }
-            AppResult.Loading -> {
+            is AppResult.Loading -> {
                 // Not emitted by usecases
             }
         }
@@ -271,7 +307,7 @@ class ProjectDetailViewModel @Inject constructor(
             is AppResult.Error -> {
                 // Splitting might fail if playhead is out of bounds of the selected clip
             }
-            AppResult.Loading -> {
+            is AppResult.Loading -> {
                 // Not emitted
             }
         }
@@ -290,7 +326,7 @@ class ProjectDetailViewModel @Inject constructor(
             is AppResult.Error -> {
                 // Delete failed
             }
-            AppResult.Loading -> {
+            is AppResult.Loading -> {
                 // Not emitted
             }
         }
@@ -304,8 +340,13 @@ class ProjectDetailViewModel @Inject constructor(
         when (val result = moveClipUseCase(project, clipId, newTimelinePositionMs)) {
             is AppResult.Success -> {
                 if (isFinal) {
-                    applyEdit(result.data)
+                    val baseline = preEditProject ?: project
+                    preEditProject = null
+                    editingHistory = editingHistory.push(baseline, result.data)
+                    currentProject = result.data
+                    saveAndRefreshUi(result.data)
                 } else {
+                    if (preEditProject == null) preEditProject = project
                     currentProject = result.data
                     // Do NOT refreshContent() mid-drag: it would emit StateFlow and trigger
                     // renderTracks() -> rebindSelectedClipGestures(), replacing the move
@@ -314,9 +355,11 @@ class ProjectDetailViewModel @Inject constructor(
                 }
             }
             is AppResult.Error -> {
-                // Move failed
+                if (isFinal) {
+                    refreshContent(project, clipId)
+                }
             }
-            AppResult.Loading -> {
+            is AppResult.Loading -> {
                 // Not emitted
             }
         }
@@ -334,10 +377,95 @@ class ProjectDetailViewModel @Inject constructor(
             is AppResult.Error -> {
                 // Speed failed
             }
-            AppResult.Loading -> {
+            is AppResult.Loading -> {
                 // Not emitted
             }
         }
+    }
+
+    // ── Phase 4: Audio ──────────────────────────────────────────────────────
+
+    /** Adds an audio clip from [asset] to the AUDIO track. */
+    fun addAudioClip(asset: Asset) {
+        val project = currentProject ?: return
+        when (val result = addAudioTrackUseCase(project, asset)) {
+            is AppResult.Success -> applyEdit(result.data)
+            is AppResult.Error -> { /* add audio failed */ }
+            is AppResult.Loading -> { /* not emitted */ }
+        }
+    }
+
+    /** Sets the volume of the currently selected clip (0.0 muted → 2.0 boost). */
+    fun setSelectedClipVolume(volume: Float) {
+        val content = currentContent ?: return
+        val clipId = content.selectedClipId ?: return
+        val project = currentProject ?: return
+        when (val result = setClipVolumeUseCase(project, clipId, volume)) {
+            is AppResult.Success -> applyEdit(result.data)
+            is AppResult.Error -> { /* volume set failed */ }
+            is AppResult.Loading -> { /* not emitted */ }
+        }
+    }
+
+    // ── Phase 5: Text / Overlay / Filters ───────────────────────────────────
+
+    /** Adds a text overlay clip with the given [textStyle]. */
+    fun addTextClip(textStyle: TextStyle) {
+        val project = currentProject ?: return
+        when (val result = addTextClipUseCase(project, textStyle)) {
+            is AppResult.Success -> applyEdit(result.data)
+            is AppResult.Error -> { /* add text failed */ }
+            is AppResult.Loading -> { /* not emitted */ }
+        }
+    }
+
+    /** Adds an image/video overlay clip from [asset]. */
+    fun addOverlayClip(asset: Asset) {
+        val project = currentProject ?: return
+        when (val result = addOverlayClipUseCase(project, asset)) {
+            is AppResult.Success -> applyEdit(result.data)
+            is AppResult.Error -> { /* add overlay failed */ }
+            is AppResult.Loading -> { /* not emitted */ }
+        }
+    }
+
+    /** Applies a [VideoFilter] to the currently selected clip. */
+    fun applyFilterToSelectedClip(filter: VideoFilter) {
+        val content = currentContent ?: return
+        val clipId = content.selectedClipId ?: return
+        val project = currentProject ?: return
+        when (val result = applyFilterUseCase(project, clipId, filter)) {
+            is AppResult.Success -> applyEdit(result.data)
+            is AppResult.Error -> { /* filter apply failed */ }
+            is AppResult.Loading -> { /* not emitted */ }
+        }
+    }
+
+    /** Returns the currently selected clip (or null). */
+    fun getSelectedClip(): Clip? {
+        val clipId = currentContent?.selectedClipId ?: return null
+        return getClip(clipId)
+    }
+
+    /** Returns the [Asset] for a given assetId, or null. */
+    fun getAsset(assetId: String): Asset? = assetsMap[assetId]
+
+    // ── Phase 6: Export ──────────────────────────────────────────────────────
+
+    /** Starts exporting the current project with the given [config]. Progress is emitted
+     *  via [exportProgress]. Safe to call once; the engine handles cancellation. */
+    fun startExport(config: ExportConfig) {
+        val project = currentProject ?: return
+        launchSafely {
+            exportEngine.export(project, config).collect { progress ->
+                _exportProgress.emit(progress)
+            }
+        }
+    }
+
+    /** Requests cancellation of an in-progress export. */
+    fun cancelExport() {
+        exportEngine.cancel()
     }
 
     /**
@@ -353,8 +481,13 @@ class ProjectDetailViewModel @Inject constructor(
         when (val result = moveClipsUseCase(project, clipIds, deltaMs)) {
             is AppResult.Success -> {
                 if (isFinal) {
-                    applyEdit(result.data)
+                    val baseline = preEditProject ?: project
+                    preEditProject = null
+                    editingHistory = editingHistory.push(baseline, result.data)
+                    currentProject = result.data
+                    saveAndRefreshUi(result.data)
                 } else {
+                    if (preEditProject == null) preEditProject = project
                     currentProject = result.data
                     // Do NOT refreshContent() mid-drag (see moveSelectedClip for rationale).
                 }
@@ -362,7 +495,7 @@ class ProjectDetailViewModel @Inject constructor(
             is AppResult.Error -> {
                 // Group move failed
             }
-            AppResult.Loading -> {
+            is AppResult.Loading -> {
                 // Not emitted
             }
         }
@@ -416,6 +549,23 @@ class ProjectDetailViewModel @Inject constructor(
                 )
             } else state
         }
+        extractWaveforms(project)
+    }
+
+    private fun extractWaveforms(project: Project) {
+        project.timeline.tracks
+            .filter { it.type == TrackType.AUDIO }
+            .flatMap { it.clips }
+            .forEach { clip ->
+                if (!_waveforms.value.containsKey(clip.assetId)) {
+                    val asset = assetsMap[clip.assetId] ?: return@forEach
+                    launchSafely {
+                        audioEngine.extractWaveform(asset).onSuccess { data ->
+                            _waveforms.update { it + (clip.assetId to data) }
+                        }
+                    }
+                }
+            }
     }
 
     private fun observePlaybackState() {

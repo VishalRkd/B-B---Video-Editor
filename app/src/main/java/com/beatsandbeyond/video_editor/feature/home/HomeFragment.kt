@@ -47,6 +47,13 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>() {
         observeUiState()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Force the ViewModel to reload projects when Fragment resumes
+        // This ensures the Flow collection is active after navigation
+        viewModel.loadProjects()
+    }
+
     // ── Setup ─────────────────────────────────────────────────────────────────
 
     private fun setupToolbar() {

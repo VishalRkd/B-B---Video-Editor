@@ -51,6 +51,9 @@ class ExoPlayerPreviewEngine @Inject constructor(
     private var player: ExoPlayer? = null
     private var timelineClips: List<Clip> = emptyList()
 
+    // Seek requested before the player finished preparing. Applied once STATE_READY.
+    private var pendingSeekMs: Long? = null
+
     private val scope = CoroutineScope(dispatchers.main + SupervisorJob())
     private var positionUpdateJob: Job? = null
 
@@ -140,8 +143,17 @@ class ExoPlayerPreviewEngine @Inject constructor(
                 exo.setPlaybackSpeed(activeClip.speedFactor)
             }
 
-            exo.seekTo(targetIndex, targetOffsetMs)
-            _currentPositionMs.value = previousPositionMs
+            // Defer the seek until the player is STATE_READY. Seeking immediately after
+            // prepare() is a race — the player ignores it or applies it to the wrong window.
+            // BUT if the player is ALREADY ready (e.g. a second loadTimeline without release),
+            // onPlaybackStateChanged won't re-fire, so apply the seek inline here.
+            if (exo.playbackState == Player.STATE_READY) {
+                seekToInternal(previousPositionMs)
+                pendingSeekMs = null
+            } else {
+                pendingSeekMs = previousPositionMs
+                _currentPositionMs.value = previousPositionMs
+            }
 
             if (wasPlaying) {
                 exo.playWhenReady = true
@@ -184,41 +196,54 @@ class ExoPlayerPreviewEngine @Inject constructor(
     override suspend fun seekTo(positionMs: Long) {
         withContext(dispatchers.main) {
             val exo = ensurePlayer()
-            // Find the clip containing this absolute timeline position
-            var targetIndex = -1
-            var targetOffsetMs = 0L
-            for (i in timelineClips.indices) {
-                val clip = timelineClips[i]
-                if (positionMs >= clip.timelinePositionMs && positionMs <= clip.timelineEndMs) {
-                    targetIndex = i
-                    val relativeTimelineOffsetMs = positionMs - clip.timelinePositionMs
-                    targetOffsetMs = (relativeTimelineOffsetMs * clip.speedFactor).toLong()
-                    break
-                }
-            }
-
-            if (targetIndex != -1) {
-                exo.seekTo(targetIndex, targetOffsetMs)
+            // If the player isn't ready yet, defer until STATE_READY (see onPlaybackStateChanged).
+            if (exo.playbackState != Player.STATE_READY) {
+                pendingSeekMs = positionMs
                 _currentPositionMs.value = positionMs
-                Logger.d(TAG, "Seeked to clip $targetIndex at local offset $targetOffsetMs ms (absolute $positionMs ms)")
-            } else if (positionMs >= (timelineClips.lastOrNull()?.timelineEndMs ?: 0L)) {
-                // Seek to the very end of the playlist
-                val lastIndex = timelineClips.size - 1
-                val lastClip = timelineClips.lastOrNull()
-                if (lastClip != null && lastIndex >= 0) {
-                    val lastClipLocalDuration = lastClip.trimEndMs - lastClip.trimStartMs
-                    exo.seekTo(lastIndex, lastClipLocalDuration)
-                    _currentPositionMs.value = lastClip.timelineEndMs
-                }
-            } else {
-                exo.seekTo(0, 0)
-                _currentPositionMs.value = 0L
+                return@withContext
             }
+            seekToInternal(positionMs)
+        }
+    }
+
+    /** Non-suspending core seek. Safe to call from the player listener. */
+    private fun seekToInternal(positionMs: Long) {
+        val exo = player ?: return
+        // Find the clip containing this absolute timeline position
+        var targetIndex = -1
+        var targetOffsetMs = 0L
+        for (i in timelineClips.indices) {
+            val clip = timelineClips[i]
+            if (positionMs >= clip.timelinePositionMs && positionMs <= clip.timelineEndMs) {
+                targetIndex = i
+                val relativeTimelineOffsetMs = positionMs - clip.timelinePositionMs
+                targetOffsetMs = (relativeTimelineOffsetMs * clip.speedFactor).toLong()
+                break
+            }
+        }
+
+        if (targetIndex != -1) {
+            exo.seekTo(targetIndex, targetOffsetMs)
+            _currentPositionMs.value = positionMs
+            Logger.d(TAG, "Seeked to clip $targetIndex at local offset $targetOffsetMs ms (absolute $positionMs ms)")
+        } else if (positionMs >= (timelineClips.lastOrNull()?.timelineEndMs ?: 0L)) {
+            // Seek to the very end of the playlist
+            val lastIndex = timelineClips.size - 1
+            val lastClip = timelineClips.lastOrNull()
+            if (lastClip != null && lastIndex >= 0) {
+                val lastClipLocalDuration = lastClip.trimEndMs - lastClip.trimStartMs
+                exo.seekTo(lastIndex, lastClipLocalDuration)
+                _currentPositionMs.value = lastClip.timelineEndMs
+            }
+        } else {
+            exo.seekTo(0, 0)
+            _currentPositionMs.value = 0L
         }
     }
 
     override fun release() {
         stopPositionUpdates()
+        pendingSeekMs = null
         player?.let { exo ->
             exo.release()
             Logger.d(TAG, "ExoPlayer released")
@@ -262,6 +287,9 @@ class ExoPlayerPreviewEngine @Inject constructor(
             _playbackState.value = when (playbackState) {
                 Player.STATE_BUFFERING -> PlaybackState.Buffering
                 Player.STATE_READY -> {
+                    // Apply any seek that was requested before the player finished preparing.
+                    pendingSeekMs?.let { seekToInternal(it) }
+                    pendingSeekMs = null
                     if (player?.playWhenReady == true) PlaybackState.Playing
                     else PlaybackState.Ready
                 }
