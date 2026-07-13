@@ -35,8 +35,8 @@ interface ExportEngine {
     fun export(project: Project, config: ExportConfig): Flow<ExportProgress>
 
     /**
-     * Cancels the currently running export operation.
+     * Cancels the running export operation for the specified [projectId].
      * Emits [ExportProgress.Cancelled] on the active [Flow].
      */
-    fun cancel()
+    fun cancel(projectId: String)
 }

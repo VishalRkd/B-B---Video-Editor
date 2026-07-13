@@ -23,17 +23,6 @@ class MoveClipUseCase @Inject constructor(
         val track = project.timeline.tracks.firstOrNull { t -> t.clips.any { it.id == clipId } }
             ?: return AppResult.Error(NoSuchElementException("Clip $clipId not found"))
         val clip = track.clips.first { it.id == clipId }
-        val newEndMs = newTimelinePositionMs + clip.durationOnTimelineMs
-
-        val overlaps = track.clips.any { other ->
-            other.id != clipId &&
-                newTimelinePositionMs < other.timelineEndMs &&
-                newEndMs > other.timelinePositionMs
-        }
-        if (overlaps) {
-            return AppResult.Error(IllegalStateException("Clips cannot overlap on the same track"))
-        }
-
         val updatedTimeline = timelineEngine.moveClip(project.timeline, clipId, newTimelinePositionMs)
             ?: return AppResult.Error(IllegalStateException("Clips cannot overlap on the same track"))
         return AppResult.Success(project.copy(

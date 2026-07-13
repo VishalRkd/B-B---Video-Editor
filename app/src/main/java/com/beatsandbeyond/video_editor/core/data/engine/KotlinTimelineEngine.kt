@@ -129,32 +129,30 @@ class KotlinTimelineEngine @Inject constructor() : TimelineEngine {
 
     override fun computeDuration(timeline: Timeline): Long = timeline.totalDurationMs
 
-    override fun addTransition(timeline: Timeline, transition: Transition): Timeline {
+    override fun addTransition(timeline: Timeline, transition: Transition): Timeline? {
         val track = timeline.tracks.firstOrNull { t ->
             t.clips.any { it.id == transition.fromClipId } && t.clips.any { it.id == transition.toClipId }
-        } ?: throw IllegalArgumentException("Clips must be on the same track")
+        } ?: return null
 
         val fromIndex = track.clips.indexOfFirst { it.id == transition.fromClipId }
         val toIndex = track.clips.indexOfFirst { it.id == transition.toClipId }
 
-        require(toIndex == fromIndex + 1) { "Clips must be adjacent on the track" }
+        if (toIndex != fromIndex + 1) return null
         
         val fromClip = track.clips[fromIndex]
         val toClip = track.clips[toIndex]
         
-        require(transition.durationMs > 0) { "Transition duration must be positive" }
-        require(transition.durationMs <= fromClip.durationOnTimelineMs) { 
-            "Transition duration ${transition.durationMs}ms exceeds outgoing clip duration ${fromClip.durationOnTimelineMs}ms" 
-        }
-        require(transition.durationMs <= toClip.durationOnTimelineMs) { 
-            "Transition duration ${transition.durationMs}ms exceeds incoming clip duration ${toClip.durationOnTimelineMs}ms" 
-        }
+        if (transition.durationMs <= 0) return null
+        if (transition.durationMs > fromClip.durationOnTimelineMs) return null
+        if (transition.durationMs > toClip.durationOnTimelineMs) return null
 
         val updatedTransitions = timeline.transitions.filter { it.id != transition.id } + transition
         return timeline.copy(transitions = updatedTransitions)
     }
 
-    override fun removeTransition(timeline: Timeline, transitionId: String): Timeline {
+    override fun removeTransition(timeline: Timeline, transitionId: String): Timeline? {
+        val exists = timeline.transitions.any { it.id == transitionId }
+        if (!exists) return null
         val updatedTransitions = timeline.transitions.filter { it.id != transitionId }
         return timeline.copy(transitions = updatedTransitions)
     }

@@ -13,6 +13,9 @@ import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import android.os.Handler
+import android.os.HandlerThread
+import com.beatsandbeyond.video_editor.core.utils.Logger
 
 /**
  * Helper class that sets up an EGL context and runs a GLSL shader pass
@@ -23,8 +26,9 @@ class GLFilterRenderer(
     private val inputSurface: Surface,
     private val width: Int,
     private val height: Int
-) {
+) : SurfaceTexture.OnFrameAvailableListener {
     companion object {
+        private const val TAG = "GLFilterRenderer"
         private const val FLOAT_SIZE_BYTES = 4
         private const val TRIANGLE_VERTICES_DATA_STRIDE_BYTES = 5 * FLOAT_SIZE_BYTES
         private const val TRIANGLE_VERTICES_DATA_POS_OFFSET = 0
@@ -88,6 +92,11 @@ class GLFilterRenderer(
         private set
     var decoderSurface: Surface? = null
         private set
+
+    private val handlerThread = HandlerThread("GLFilterRendererCallback").apply { start() }
+    private val callbackHandler = Handler(handlerThread.looper)
+    private val frameSyncObject = Object()
+    private var frameAvailable = false
 
     var brightness: Float = 1.0f
     var contrast: Float = 1.0f
@@ -182,6 +191,7 @@ class GLFilterRenderer(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
         surfaceTexture = SurfaceTexture(textureId)
+        surfaceTexture?.setOnFrameAvailableListener(this, callbackHandler)
         decoderSurface = Surface(surfaceTexture)
     }
 
@@ -200,6 +210,14 @@ class GLFilterRenderer(
     }
 
     fun makeCurrent() {
+        val currentContext = EGL14.eglGetCurrentContext()
+        val currentDrawSurface = EGL14.eglGetCurrentSurface(EGL14.EGL_DRAW)
+        val currentReadSurface = EGL14.eglGetCurrentSurface(EGL14.EGL_READ)
+        if (currentContext == eglContext &&
+            currentDrawSurface == eglSurface &&
+            currentReadSurface == eglSurface) {
+            return
+        }
         if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
             throw RuntimeException("eglMakeCurrent failed")
         }
@@ -246,6 +264,34 @@ class GLFilterRenderer(
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
     }
 
+    override fun onFrameAvailable(st: SurfaceTexture?) {
+        synchronized(frameSyncObject) {
+            if (frameAvailable) {
+                Logger.w(TAG, "Frame already available, resetting")
+            }
+            frameAvailable = true
+            frameSyncObject.notifyAll()
+        }
+    }
+
+    fun awaitFrame(timeoutMs: Long = 2500L) {
+        synchronized(frameSyncObject) {
+            val endTime = System.currentTimeMillis() + timeoutMs
+            while (!frameAvailable) {
+                val delay = endTime - System.currentTimeMillis()
+                if (delay <= 0) {
+                    throw RuntimeException("Timeout waiting for frame-availability signal")
+                }
+                try {
+                    frameSyncObject.wait(delay)
+                } catch (e: InterruptedException) {
+                    throw RuntimeException(e)
+                }
+            }
+            frameAvailable = false
+        }
+    }
+
     fun setPresentationTime(timeNs: Long) {
         android.opengl.EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, timeNs)
     }
@@ -264,5 +310,6 @@ class GLFilterRenderer(
 
         surfaceTexture?.release()
         decoderSurface?.release()
+        handlerThread.quitSafely()
     }
 }

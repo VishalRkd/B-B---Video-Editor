@@ -77,6 +77,8 @@ class ProjectDetailViewModel @Inject constructor(
     private val addVideoClipUseCase: AddVideoClipUseCase,
     private val addEffectClipUseCase: AddEffectClipUseCase,
     private val addAdjustmentClipUseCase: AddAdjustmentClipUseCase,
+    private val addTransitionUseCase: AddTransitionUseCase,
+    private val removeTransitionUseCase: RemoveTransitionUseCase,
     private val dispatchers: CoroutineDispatchers,
 ) : BaseViewModel() {
 
@@ -441,6 +443,28 @@ class ProjectDetailViewModel @Inject constructor(
             is AppResult.Loading -> {
                 // Not emitted
             }
+        }
+    }
+
+    fun addTransition(transition: Transition) {
+        val project = currentProject ?: return
+        when (val result = addTransitionUseCase(project, transition)) {
+            is AppResult.Success -> applyEdit(result.data)
+            is AppResult.Error -> {
+                Logger.e("ProjectDetailViewModel", "Add transition failed", result.exception)
+            }
+            else -> {}
+        }
+    }
+
+    fun removeTransition(transitionId: String) {
+        val project = currentProject ?: return
+        when (val result = removeTransitionUseCase(project, transitionId)) {
+            is AppResult.Success -> applyEdit(result.data)
+            is AppResult.Error -> {
+                Logger.e("ProjectDetailViewModel", "Remove transition failed", result.exception)
+            }
+            else -> {}
         }
     }
 

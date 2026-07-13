@@ -61,13 +61,13 @@ interface TimelineEngine {
 
     /**
      * Adds a [Transition] between two adjacent clips.
-     * Returns a new [Timeline] containing the transition.
+     * Returns a new [Timeline] containing the transition, or null if validation fails.
      */
-    fun addTransition(timeline: Timeline, transition: Transition): Timeline
+    fun addTransition(timeline: Timeline, transition: Transition): Timeline?
 
     /**
      * Removes a transition by ID.
-     * Returns a new [Timeline] without the specified transition.
+     * Returns a new [Timeline] without the specified transition, or null if not found.
      */
-    fun removeTransition(timeline: Timeline, transitionId: String): Timeline
+    fun removeTransition(timeline: Timeline, transitionId: String): Timeline?
 }

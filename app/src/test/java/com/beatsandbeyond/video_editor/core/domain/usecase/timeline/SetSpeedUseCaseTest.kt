@@ -67,4 +67,13 @@ class SetSpeedUseCaseTest {
         assertTrue(result1 is AppResult.Error)
         assertTrue(result2 is AppResult.Error)
     }
+
+    @Test
+    fun `set speed multiplier on video clip changes duration on timeline`() {
+        val result = useCase(project, clipId, 2.0f)
+        assertTrue(result is AppResult.Success)
+        val updatedProject = (result as AppResult.Success).data
+        val updatedClip = updatedProject.timeline.tracks.first().clips.first()
+        assertEquals(5000L, updatedClip.durationOnTimelineMs) // 10000L / 2.0f
+    }
 }

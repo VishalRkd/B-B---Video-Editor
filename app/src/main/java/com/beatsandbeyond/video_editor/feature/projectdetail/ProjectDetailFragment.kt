@@ -827,16 +827,42 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         }
                     ).apply {
                         updateViewport(binding.timelineHorizontalScroll.scrollX, binding.timelineHorizontalScroll.width)
+                        onTransitionClick = { clipAId, clipBId, hasTransition, transitionId ->
+                            if (hasTransition && transitionId != null) {
+                                viewModel.removeTransition(transitionId)
+                            } else {
+                                val newTransition = com.beatsandbeyond.video_editor.core.domain.model.Transition(
+                                    id = java.util.UUID.randomUUID().toString(),
+                                    type = com.beatsandbeyond.video_editor.core.domain.model.TransitionType.CROSSFADE,
+                                    durationMs = 1000L,
+                                    fromClipId = clipAId,
+                                    toClipId = clipBId
+                                )
+                                viewModel.addTransition(newTransition)
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Transition created. Preview & export rendering coming soon!",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                     }
                 }
-                controller.render(track, state.selectedClipIds)
+                controller.render(track, state.selectedClipIds, state.project.timeline.transitions)
             }
 
             // Rebind gestures for the selected clip only (selection changed → rebind)
             rebindSelectedClipGestures(state)
 
             // Context Toolbar toggle
-            binding.contextToolbar.root.visibility = if (state.selectedClipId != null) View.VISIBLE else View.INVISIBLE
+            val selectedId = state.selectedClipId
+            if (selectedId != null) {
+                binding.contextToolbar.root.visibility = View.VISIBLE
+                val trackType = state.project.timeline.trackTypeOf(selectedId)
+                binding.contextToolbar.btnSpeed.visibility = if (trackType == TrackType.VIDEO) View.VISIBLE else View.GONE
+            } else {
+                binding.contextToolbar.root.visibility = View.INVISIBLE
+            }
         } finally {
             isRenderingTracks = false
         }

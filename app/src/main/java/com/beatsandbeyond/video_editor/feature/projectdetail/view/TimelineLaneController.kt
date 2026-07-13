@@ -16,6 +16,7 @@ import com.beatsandbeyond.video_editor.core.domain.model.Asset
 import com.beatsandbeyond.video_editor.core.domain.model.Clip
 import com.beatsandbeyond.video_editor.core.domain.model.Track
 import com.beatsandbeyond.video_editor.core.domain.model.TrackType
+import com.beatsandbeyond.video_editor.core.domain.model.Transition
 import com.beatsandbeyond.video_editor.core.domain.model.VideoFilter
 import com.google.android.material.card.MaterialCardView
 import kotlin.math.*
@@ -39,6 +40,8 @@ class TimelineLaneController(
     private val viewMap = LinkedHashMap<String, View>()
     private val metadataMap = HashMap<String, ClipViewMetadata>()
     private val clipCache = HashMap<String, Clip>()
+    private val transitionViews = mutableListOf<View>()
+    var onTransitionClick: ((clipAId: String, clipBId: String, hasTransition: Boolean, transitionId: String?) -> Unit)? = null
     
     private var viewportScrollX = 0
     private var viewportWidth = 0
@@ -61,7 +64,7 @@ class TimelineLaneController(
     }
 
     /** Rebuilds the lane from the given track. */
-    fun render(track: Track?, selectedClipIds: Set<String>) {
+    fun render(track: Track?, selectedClipIds: Set<String>, transitions: List<Transition> = emptyList()) {
         val clips = track?.clips ?: emptyList()
         val clipIds = clips.map { it.id }.toSet()
 
@@ -86,7 +89,58 @@ class TimelineLaneController(
             updateView(view, clip, selectedClipIds)
         }
 
-        // 3. Render or update the Plus button at the end of the track (VIDEO only)
+        // 3. Render transitions (VIDEO track only)
+        transitionViews.forEach { lane.removeView(it) }
+        transitionViews.clear()
+
+        if (trackType == TrackType.VIDEO && clips.size > 1) {
+            val sortedClips = clips.sortedBy { it.timelinePositionMs }
+            val pixelsPerMs = getPixelsPerMs()
+            for (i in 0 until sortedClips.size - 1) {
+                val clipA = sortedClips[i]
+                val clipB = sortedClips[i + 1]
+                val gap = clipB.timelinePositionMs - clipA.timelineEndMs
+                if (kotlin.math.abs(gap) < 50) { // Adjacent clips (within 50ms tolerance)
+                    val seamMs = clipA.timelineEndMs
+                    val existingTransition = transitions.firstOrNull { 
+                        (it.fromClipId == clipA.id && it.toClipId == clipB.id) ||
+                        (it.fromClipId == clipB.id && it.toClipId == clipA.id)
+                    }
+                    val hasTransition = existingTransition != null
+
+                    val size = (24 * lane.context.resources.displayMetrics.density).toInt()
+                    val button = ImageView(lane.context).apply {
+                        scaleType = ImageView.ScaleType.CENTER_INSIDE
+                        layoutParams = ConstraintLayout.LayoutParams(size, size).apply {
+                            startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                            topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+                            bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+                            marginStart = (seamMs * pixelsPerMs).toInt() - size / 2
+                        }
+                        
+                        if (hasTransition) {
+                            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                            imageTintList = ColorStateList.valueOf(0xFFFFAF3F.toInt()) // Amber-orange primary
+                            background = ContextCompat.getDrawable(context, android.R.drawable.presence_online)
+                            backgroundTintList = ColorStateList.valueOf(0xFF000000.toInt())
+                        } else {
+                            setImageResource(android.R.drawable.ic_input_add)
+                            imageTintList = ColorStateList.valueOf(0xFFFFFFFF.toInt()) // White plus
+                            background = ContextCompat.getDrawable(context, android.R.drawable.presence_offline)
+                            backgroundTintList = ColorStateList.valueOf(0xFF333333.toInt())
+                        }
+
+                        setOnClickListener {
+                            onTransitionClick?.invoke(clipA.id, clipB.id, hasTransition, existingTransition?.id)
+                        }
+                    }
+                    lane.addView(button)
+                    transitionViews.add(button)
+                }
+            }
+        }
+
+        // 4. Render or update the Plus button at the end of the track (VIDEO only)
         if (trackType == TrackType.VIDEO) {
             val lastClip = clips.maxByOrNull { it.timelinePositionMs + it.durationOnTimelineMs }
             val plusPosMs = lastClip?.let { it.timelinePositionMs + it.durationOnTimelineMs } ?: 0L

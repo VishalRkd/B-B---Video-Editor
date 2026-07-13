@@ -113,12 +113,13 @@ class KotlinTimelineEngineTest {
             toClipId = "clip_2"
         )
         val result = engine.addTransition(timeline, transition)
-        assertEquals(1, result.transitions.size)
+        assertNotNull(result)
+        assertEquals(1, result!!.transitions.size)
         assertEquals("trans_1", result.transitions.first().id)
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun `addTransition with non-adjacent clips throws exception`() {
+    @Test
+    fun `addTransition with non-adjacent clips returns null`() {
         // Create a non-adjacent setup by adding a 3rd clip in between them
         val clip1 = Clip("c1", "a1", 0L, 0L, 2000L)
         val clip2 = Clip("c2", "a2", 3000L, 0L, 2000L)
@@ -127,22 +128,26 @@ class KotlinTimelineEngineTest {
         val testTimeline = Timeline("t1", listOf(track))
 
         val transition = Transition("t_err", TransitionType.CROSSFADE, 1000L, "c1", "c3")
-        engine.addTransition(testTimeline, transition)
+        val result = engine.addTransition(testTimeline, transition)
+        assertNull(result)
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun `addTransition with duration exceeding clip duration throws exception`() {
+    @Test
+    fun `addTransition with duration exceeding clip duration returns null`() {
         val transition = Transition("t_err", TransitionType.CROSSFADE, 6000L, "clip_1", "clip_2") // clip_2 duration is 4000
-        engine.addTransition(timeline, transition)
+        val result = engine.addTransition(timeline, transition)
+        assertNull(result)
     }
 
     @Test
     fun `removeTransition removes transition by ID`() {
         val transition = Transition("trans_1", TransitionType.CROSSFADE, 1000L, "clip_1", "clip_2")
         val withTrans = engine.addTransition(timeline, transition)
-        assertEquals(1, withTrans.transitions.size)
+        assertNotNull(withTrans)
+        assertEquals(1, withTrans!!.transitions.size)
 
         val removed = engine.removeTransition(withTrans, "trans_1")
-        assertEquals(0, removed.transitions.size)
+        assertNotNull(removed)
+        assertEquals(0, removed!!.transitions.size)
     }
 }

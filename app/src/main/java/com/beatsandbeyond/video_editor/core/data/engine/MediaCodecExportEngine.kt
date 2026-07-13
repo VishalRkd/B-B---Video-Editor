@@ -13,10 +13,13 @@ import android.provider.MediaStore
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.engine.ExportEngine
 import com.beatsandbeyond.video_editor.core.domain.model.Clip
+import com.beatsandbeyond.video_editor.core.domain.model.Effect
 import com.beatsandbeyond.video_editor.core.domain.model.EffectType
 import com.beatsandbeyond.video_editor.core.domain.model.ExportConfig
 import com.beatsandbeyond.video_editor.core.domain.model.ExportProgress
 import com.beatsandbeyond.video_editor.core.domain.model.Project
+import com.beatsandbeyond.video_editor.core.domain.model.Timeline
+import com.beatsandbeyond.video_editor.core.domain.model.Track
 import com.beatsandbeyond.video_editor.core.domain.model.TrackType
 import com.beatsandbeyond.video_editor.core.domain.repository.AssetRepository
 import com.beatsandbeyond.video_editor.core.utils.CoroutineDispatchers
@@ -61,14 +64,16 @@ class MediaCodecExportEngine @Inject constructor(
         private const val VIDEO_MIME = "video/avc"
     }
 
-    @Volatile private var cancelled = false
+    private val activeCancellationFlags = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
 
-    override fun cancel() {
-        cancelled = true
+    override fun cancel(projectId: String) {
+        activeCancellationFlags[projectId]?.set(true)
+        Logger.d(TAG, "Requested cancellation for project: $projectId")
     }
 
     override fun export(project: Project, config: ExportConfig): Flow<ExportProgress> = flow {
-        cancelled = false
+        val cancellationFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+        activeCancellationFlags[project.id] = cancellationFlag
         val startTime = System.currentTimeMillis()
         emit(ExportProgress.Started)
 
@@ -104,13 +109,13 @@ class MediaCodecExportEngine @Inject constructor(
 
             // ── Video transcode ──
             val videoTrackIndex = transcodeVideoClips(
-                clips = clips,
+                timeline = project.timeline,
                 config = config,
                 muxer = muxer,
                 totalDurationMs = totalDurationMs,
                 hasAudio = audioMuxerTrackIndex >= 0,
                 onProgress = { fraction, frameMs -> emit(ExportProgress.InProgress(fraction, frameMs)) },
-                isCancelled = { cancelled },
+                isCancelled = { cancellationFlag.get() },
             )
 
             // ── Audio pass-through (all audio clips) ──
@@ -119,7 +124,7 @@ class MediaCodecExportEngine @Inject constructor(
                     audioClips = audioClips,
                     muxer = muxer,
                     audioMuxerTrackIndex = audioMuxerTrackIndex,
-                    isCancelled = { cancelled },
+                    isCancelled = { cancellationFlag.get() },
                 )
             }
 
@@ -137,7 +142,9 @@ class MediaCodecExportEngine @Inject constructor(
         } catch (e: Exception) {
             Logger.e(TAG, "Export failed", e)
             muxer?.release()
-            if (cancelled) emit(ExportProgress.Cancelled) else emit(ExportProgress.Failed(e))
+            if (cancellationFlag.get()) emit(ExportProgress.Cancelled) else emit(ExportProgress.Failed(e))
+        } finally {
+            activeCancellationFlags.remove(project.id)
         }
     }.flowOn(Dispatchers.Default)
 
@@ -160,7 +167,7 @@ class MediaCodecExportEngine @Inject constructor(
     }
 
     private suspend fun transcodeVideoClips(
-        clips: List<Clip>,
+        timeline: Timeline,
         config: ExportConfig,
         muxer: MediaMuxer,
         totalDurationMs: Long,
@@ -168,6 +175,7 @@ class MediaCodecExportEngine @Inject constructor(
         onProgress: suspend (Float, Long) -> Unit,
         isCancelled: () -> Boolean,
     ): Int {
+        val clips = timeline.primaryVideoTrack?.clips ?: emptyList()
         val encoder = MediaCodec.createEncoderByType(VIDEO_MIME)
         val outWidth = config.resolution.width
         val outHeight = config.resolution.height
@@ -243,21 +251,6 @@ class MediaCodecExportEngine @Inject constructor(
                 val extractor = MediaExtractor()
                 var decoder: MediaCodec? = null
 
-                var brightnessVal = 1.0f
-                var contrastVal = 1.0f
-                var saturationVal = 1.0f
-                for (effect in clip.effects) {
-                    when (effect.type) {
-                        EffectType.BRIGHTNESS -> brightnessVal = effect.parameters["intensity"] ?: 1.0f
-                        EffectType.CONTRAST -> contrastVal = effect.parameters["intensity"] ?: 1.0f
-                        EffectType.SATURATION -> saturationVal = effect.parameters["intensity"] ?: 1.0f
-                        else -> {}
-                    }
-                }
-                renderer.brightness = brightnessVal
-                renderer.contrast = contrastVal
-                renderer.saturation = saturationVal
-
                 try {
                     extractor.setDataSource(context, sourceUri, null)
                     val videoIdx = (0 until extractor.trackCount).firstOrNull { idx ->
@@ -322,7 +315,34 @@ class MediaCodecExportEngine @Inject constructor(
                                         val speedAdjustedUs = (relativeUs / speedFactor).toLong()
                                         val outputPtsUs = runningPresentationTimeOffsetUs + speedAdjustedUs
 
+                                        val frameTimelineTimeMs = outputPtsUs / 1000L
+                                        val activeEffects = mutableListOf<Effect>()
+                                        activeEffects.addAll(clip.effects)
+                                        val otherTracks = timeline.tracks.filter { it.type == TrackType.EFFECT || it.type == TrackType.ADJUSTMENT }
+                                        for (track in otherTracks) {
+                                            for (otherClip in track.clips) {
+                                                if (frameTimelineTimeMs >= otherClip.timelinePositionMs && frameTimelineTimeMs <= otherClip.timelineEndMs) {
+                                                    activeEffects.addAll(otherClip.effects)
+                                                }
+                                            }
+                                        }
+                                        var brightnessVal = 1.0f
+                                        var contrastVal = 1.0f
+                                        var saturationVal = 1.0f
+                                        for (effect in activeEffects) {
+                                            when (effect.type) {
+                                                EffectType.BRIGHTNESS -> brightnessVal *= (effect.parameters["intensity"] ?: 1.0f)
+                                                EffectType.CONTRAST -> contrastVal *= (effect.parameters["intensity"] ?: 1.0f)
+                                                EffectType.SATURATION -> saturationVal *= (effect.parameters["intensity"] ?: 1.0f)
+                                                else -> {}
+                                            }
+                                        }
+                                        renderer.brightness = brightnessVal
+                                        renderer.contrast = contrastVal
+                                        renderer.saturation = saturationVal
+
                                         decoder.releaseOutputBuffer(outBufId, true)
+                                        renderer.awaitFrame(2500L)
                                         renderer.drawFrame()
                                         renderer.setPresentationTime(outputPtsUs * 1000L)
                                         decoderOutputAvailable = false
@@ -403,6 +423,9 @@ class MediaCodecExportEngine @Inject constructor(
         audioMuxerTrackIndex: Int,
         isCancelled: () -> Boolean,
     ) {
+        // NOTE: Speed changes (speedFactor) apply exclusively to primary VIDEO track clips by design.
+        // Background AUDIO track clips are intended to stay at normal (1.0x) speed and are copied raw
+        // via pass-through mode without decoding/resampling to prevent audio drift or distortion.
         if (audioMuxerTrackIndex < 0) return
         var runningAudioPresentationTimeOffsetUs = 0L
 
@@ -491,6 +514,23 @@ class MediaCodecExportEngine @Inject constructor(
             values.clear()
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
             resolver.update(itemUri, values, null, null)
+        } else {
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                @Suppress("DEPRECATION")
+                put(MediaStore.Video.Media.DATA, file.absolutePath)
+            }
+            val resolver = context.contentResolver
+            val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            resolver.insert(collection, values)
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(file.absolutePath),
+                arrayOf("video/mp4")
+            ) { path, uri ->
+                Logger.d(TAG, "Legacy MediaStore registration for path $path: $uri")
+            }
         }
     }
 

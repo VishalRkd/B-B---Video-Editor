@@ -141,7 +141,7 @@ class ExportWorker(
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Unknown error")))
         } finally {
             if (isStopped) {
-                exportEngine.cancel()
+                exportEngine.cancel(projectId)
             }
         }
     }

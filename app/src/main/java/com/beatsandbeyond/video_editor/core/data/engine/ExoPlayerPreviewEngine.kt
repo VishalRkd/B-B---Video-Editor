@@ -56,6 +56,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
     override val currentPositionMs: Flow<Long> = _currentPositionMs.asStateFlow()
 
     private var player: ExoPlayer? = null
+    private var audioPlayer: ExoPlayer? = null
     private var timelineClips: List<Clip> = emptyList()
 
     // Seek requested before the player finished preparing. Applied once STATE_READY.
@@ -71,6 +72,13 @@ class ExoPlayerPreviewEngine @Inject constructor(
             exo.addListener(createPlayerListener())
             player = exo
             Logger.d(TAG, "ExoPlayer instance created")
+        }
+    }
+
+    private fun ensureAudioPlayer(): ExoPlayer {
+        return audioPlayer ?: ExoPlayer.Builder(context).build().also { exo ->
+            audioPlayer = exo
+            Logger.d(TAG, "ExoPlayer audio instance created")
         }
     }
 
@@ -93,19 +101,16 @@ class ExoPlayerPreviewEngine @Inject constructor(
             timelineClips = emptyList()
             _playbackState.value = PlaybackState.Idle
             player?.clearMediaItems()
+            audioPlayer?.clearMediaItems()
             return
         }
 
         timelineClips = clips
 
         val dataSourceFactory = DefaultDataSource.Factory(context)
-        val concatenatingSource = ConcatenatingMediaSource()
-
-        val audioTrack = timeline.tracks.firstOrNull { it.type == TrackType.AUDIO }
-        val audioClips = audioTrack?.clips ?: emptyList()
+        val videoConcatenatingSource = ConcatenatingMediaSource()
 
         for (clip in clips) {
-            // Resolve assetId -> URI via AssetRepository
             val assetResult = assetRepository.getAssetById(clip.assetId)
             if (assetResult is AppResult.Error) {
                 Logger.e(TAG, "Asset not found for clip: ${clip.assetId}")
@@ -125,65 +130,50 @@ class ExoPlayerPreviewEngine @Inject constructor(
                 clip.trimStartMs * 1000L,
                 clip.trimEndMs * 1000L
             )
+            videoConcatenatingSource.addMediaSource(clippedVideo)
+        }
 
-            val sourcesToMerge = mutableListOf<androidx.media3.exoplayer.source.MediaSource>()
-            sourcesToMerge.add(clippedVideo)
+        val audioTrack = timeline.tracks.firstOrNull { it.type == TrackType.AUDIO }
+        val audioClips = audioTrack?.clips ?: emptyList()
 
-            val vStart = clip.timelinePositionMs
-            val vEnd = clip.timelineEndMs
-
-            for (ac in audioClips) {
-                val aStart = ac.timelinePositionMs
-                val aEnd = ac.timelineEndMs
-
-                val oStart = maxOf(vStart, aStart)
-                val oEnd = minOf(vEnd, aEnd)
-
-                if (oStart < oEnd) {
-                    val dOffsetMs = oStart - vStart
-                    val audioStartMs = ac.trimStartMs + ((oStart - aStart) * ac.speedFactor).toLong()
-                    val audioDurationMs = oEnd - oStart
-                    val audioEndMs = audioStartMs + (audioDurationMs * ac.speedFactor).toLong()
-
-                    val audioAssetResult = assetRepository.getAssetById(ac.assetId)
-                    if (audioAssetResult is AppResult.Success) {
-                        val audioAsset = audioAssetResult.data
-                        val audioUri = Uri.parse(audioAsset.mediaUri)
-                        val audioMediaItem = MediaItem.Builder().setUri(audioUri).build()
-                        val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-                            .createMediaSource(audioMediaItem)
-                        val clippedAudio = ClippingMediaSource(
-                            audioSource,
-                            audioStartMs * 1000L,
-                            audioEndMs * 1000L
-                        )
-
-                        val finalAudioSource = if (dOffsetMs > 0) {
-                            val silence = SilenceMediaSource(dOffsetMs * 1000L)
-                            ConcatenatingMediaSource(silence, clippedAudio)
-                        } else {
-                            clippedAudio
-                        }
-                        sourcesToMerge.add(finalAudioSource)
-                    }
-                }
+        val audioConcatenatingSource = ConcatenatingMediaSource()
+        var currentAudioPosMs = 0L
+        val sortedAudioClips = audioClips.sortedBy { it.timelinePositionMs }
+        for (ac in sortedAudioClips) {
+            val gapMs = ac.timelinePositionMs - currentAudioPosMs
+            if (gapMs > 0) {
+                val silence = SilenceMediaSource(gapMs * 1000L)
+                audioConcatenatingSource.addMediaSource(silence)
             }
 
-            val mergedSource = if (sourcesToMerge.size > 1) {
-                MergingMediaSource(*sourcesToMerge.toTypedArray())
-            } else {
-                clippedVideo
+            val audioAssetResult = assetRepository.getAssetById(ac.assetId)
+            if (audioAssetResult is AppResult.Success) {
+                val audioAsset = audioAssetResult.data
+                val audioUri = Uri.parse(audioAsset.mediaUri)
+                val audioMediaItem = MediaItem.Builder().setUri(audioUri).build()
+                val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                    .createMediaSource(audioMediaItem)
+                val clippedAudio = ClippingMediaSource(
+                    audioSource,
+                    ac.trimStartMs * 1000L,
+                    ac.trimEndMs * 1000L
+                )
+                audioConcatenatingSource.addMediaSource(clippedAudio)
             }
-            concatenatingSource.addMediaSource(mergedSource)
+            currentAudioPosMs = ac.timelineEndMs
         }
 
         withContext(dispatchers.main) {
             val exo = ensurePlayer()
+            val exoAudio = ensureAudioPlayer()
             val previousPositionMs = _currentPositionMs.value
             val wasPlaying = exo.playWhenReady
 
-            exo.setMediaSource(concatenatingSource)
+            exo.setMediaSource(videoConcatenatingSource)
             exo.prepare()
+
+            exoAudio.setMediaSource(audioConcatenatingSource)
+            exoAudio.prepare()
             
             // Find target clip and offset for current timeline position
             var targetIndex = 0
@@ -203,10 +193,6 @@ class ExoPlayerPreviewEngine @Inject constructor(
                 exo.setPlaybackSpeed(activeClip.speedFactor)
             }
 
-            // Defer the seek until the player is STATE_READY. Seeking immediately after
-            // prepare() is a race — the player ignores it or applies it to the wrong window.
-            // BUT if the player is ALREADY ready (e.g. a second loadTimeline without release),
-            // onPlaybackStateChanged won't re-fire, so apply the seek inline here.
             if (exo.playbackState == Player.STATE_READY) {
                 seekToInternal(previousPositionMs)
                 pendingSeekMs = null
@@ -218,10 +204,14 @@ class ExoPlayerPreviewEngine @Inject constructor(
             if (wasPlaying) {
                 exo.playWhenReady = true
                 exo.play()
+                exoAudio.playWhenReady = true
+                exoAudio.play()
                 startPositionUpdates()
             } else {
                 exo.playWhenReady = false
                 exo.pause()
+                exoAudio.playWhenReady = false
+                exoAudio.pause()
                 stopPositionUpdates()
             }
 
@@ -236,10 +226,15 @@ class ExoPlayerPreviewEngine @Inject constructor(
             exo.play()
             startPositionUpdates()
         }
+        audioPlayer?.let { exo ->
+            exo.playWhenReady = true
+            exo.play()
+        }
     }
 
     override fun pause() {
         player?.pause()
+        audioPlayer?.pause()
         stopPositionUpdates()
     }
 
@@ -247,6 +242,10 @@ class ExoPlayerPreviewEngine @Inject constructor(
         player?.let { exo ->
             exo.stop()
             exo.seekTo(0, 0)
+        }
+        audioPlayer?.let { exo ->
+            exo.stop()
+            exo.seekTo(0)
         }
         stopPositionUpdates()
         _currentPositionMs.value = 0L
@@ -269,6 +268,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
     /** Non-suspending core seek. Safe to call from the player listener. */
     private fun seekToInternal(positionMs: Long) {
         val exo = player ?: return
+        val exoAudio = audioPlayer
         // Find the clip containing this absolute timeline position
         var targetIndex = -1
         var targetOffsetMs = 0L
@@ -284,6 +284,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
         if (targetIndex != -1) {
             exo.seekTo(targetIndex, targetOffsetMs)
+            exoAudio?.seekTo(positionMs)
             _currentPositionMs.value = positionMs
             Logger.d(TAG, "Seeked to clip $targetIndex at local offset $targetOffsetMs ms (absolute $positionMs ms)")
         } else if (positionMs >= (timelineClips.lastOrNull()?.timelineEndMs ?: 0L)) {
@@ -293,10 +294,12 @@ class ExoPlayerPreviewEngine @Inject constructor(
             if (lastClip != null && lastIndex >= 0) {
                 val lastClipLocalDuration = lastClip.trimEndMs - lastClip.trimStartMs
                 exo.seekTo(lastIndex, lastClipLocalDuration)
+                exoAudio?.seekTo(lastClip.timelineEndMs)
                 _currentPositionMs.value = lastClip.timelineEndMs
             }
         } else {
             exo.seekTo(0, 0)
+            exoAudio?.seekTo(0)
             _currentPositionMs.value = 0L
         }
     }
@@ -309,6 +312,11 @@ class ExoPlayerPreviewEngine @Inject constructor(
             Logger.d(TAG, "ExoPlayer released")
         }
         player = null
+        audioPlayer?.let { exo ->
+            exo.release()
+            Logger.d(TAG, "ExoPlayer audio released")
+        }
+        audioPlayer = null
         _playbackState.value = PlaybackState.Idle
         _currentPositionMs.value = 0L
     }
@@ -366,13 +374,20 @@ class ExoPlayerPreviewEngine @Inject constructor(
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            val exoAudio = audioPlayer
             if (isPlaying) {
                 _playbackState.value = PlaybackState.Playing
                 startPositionUpdates()
+                if (exoAudio?.isPlaying == false) {
+                    exoAudio.play()
+                }
             } else {
                 stopPositionUpdates()
                 if (player?.playbackState == Player.STATE_READY) {
                     _playbackState.value = PlaybackState.Ready
+                }
+                if (exoAudio?.isPlaying == true) {
+                    exoAudio.pause()
                 }
             }
         }
