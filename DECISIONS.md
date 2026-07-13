@@ -220,3 +220,17 @@ This file records significant architectural decisions, the alternatives consider
 - `ProjectDetailFragment` receives `projectId` via `navArgs()` delegate
 - `HomeFragmentDirections.actionHomeFragmentToProjectDetailFragment(project.id)` is generated
 - `MediaImportFragmentDirections.actionMediaImportFragmentToProjectDetailFragment(projectId)` is generated
+
+---
+
+## ADR-013: Drag Gesture Performance Optimization (Phase 3)
+
+**Date**: Phase 3  
+**Status**: Active
+
+**Decision**: For highly interactive gestures (e.g. clip trimming, clip moving), the UI and preview engine are updated in real-time in memory (`isFinal = false`), but database updates (Room auto-save) and undo/redo history stack entries are deferred until the user releases the gesture (`isFinal = true` on `ACTION_UP` or `ACTION_CANCEL`).
+
+**Rationale**:
+- Storing to database and serialization/deserialization on every touch drag event (which triggers multiple times per millisecond) is extremely heavy and results in massive UI stutter and lag.
+- Deferring the disk write to gesture completion maintains a smooth 60fps interaction during the scrub, while ensuring data integrity.
+- Intermediate drag states do not pollute the undo/redo stack, so undoing a trim operation reverts the whole drag action in one step instead of multiple micro-frames.

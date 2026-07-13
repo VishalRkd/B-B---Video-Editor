@@ -1,0 +1,16 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="12dp"
+    android:height="72dp"
+    android:viewportWidth="12"
+    android:viewportHeight="72">
+  <!-- Rounded right handle cap -->
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M 0 0 L 8 0 C 10.2 0 12 1.8 12 4 L 12 68 C 12 70.2 10.2 72 8 72 L 0 72 Z" />
+  <!-- Grip marks -->
+  <path
+      android:strokeColor="#0D0C0E"
+      android:strokeWidth="1.2"
+      android:strokeLineCap="round"
+      android:pathData="M 4 24 L 4 48 M 7 24 L 7 48" />
+</vector>

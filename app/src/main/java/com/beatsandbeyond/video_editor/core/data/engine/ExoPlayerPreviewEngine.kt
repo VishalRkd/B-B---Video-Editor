@@ -3,36 +3,39 @@ package com.beatsandbeyond.video_editor.core.data.engine
 import android.content.Context
 import android.net.Uri
 import android.view.Surface
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.engine.PreviewEngine
+import com.beatsandbeyond.video_editor.core.domain.model.Clip
 import com.beatsandbeyond.video_editor.core.domain.model.PlaybackState
 import com.beatsandbeyond.video_editor.core.domain.model.Timeline
 import com.beatsandbeyond.video_editor.core.domain.repository.AssetRepository
-import com.beatsandbeyond.video_editor.core.common.AppResult
+import com.beatsandbeyond.video_editor.core.utils.CoroutineDispatchers
 import com.beatsandbeyond.video_editor.core.utils.Logger
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * Concrete implementation of [PreviewEngine] backed by AndroidX Media3 ExoPlayer.
  *
- * Phase 2 scope: single-clip preview from the primary video track.
- * The engine resolves clip [assetId]s → media URIs via [AssetRepository].
- * Multi-clip composition is Phase 3.
- *
- * Architecture note: ExoPlayer lives in the data layer, behind the [PreviewEngine]
- * interface. No ViewModel or Fragment imports ExoPlayer or Media3 classes directly.
- *
- * Lifecycle: [release()] must be called when the owning ViewModel is cleared.
+ * Phase 3 scope:
+ * - Load all clips from the primary video track sequentially.
+ * - Map speed multipliers to ExoPlayer.
+ * - Precise absolute timeline seeking.
+ * - Periodic timeline position updates.
  */
+@Singleton
 class ExoPlayerPreviewEngine @Inject constructor(
-    @param:ApplicationContext private val context: Context,
+    @ApplicationContext private val context: Context,
     private val assetRepository: AssetRepository,
+    private val dispatchers: CoroutineDispatchers,
 ) : PreviewEngine {
 
     companion object {
@@ -46,6 +49,10 @@ class ExoPlayerPreviewEngine @Inject constructor(
     override val currentPositionMs: Flow<Long> = _currentPositionMs.asStateFlow()
 
     private var player: ExoPlayer? = null
+    private var timelineClips: List<Clip> = emptyList()
+
+    private val scope = CoroutineScope(dispatchers.main + SupervisorJob())
+    private var positionUpdateJob: Job? = null
 
     // ── Player lifecycle ────────────────────────────────────────────────────
 
@@ -69,61 +76,121 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
     override suspend fun loadTimeline(timeline: Timeline) {
         val primaryTrack = timeline.primaryVideoTrack
-        val firstClip = primaryTrack?.clips?.firstOrNull()
+        val clips = primaryTrack?.clips ?: emptyList()
 
-        if (firstClip == null) {
+        if (clips.isEmpty()) {
             Logger.w(TAG, "Timeline has no clips — nothing to preview")
+            timelineClips = emptyList()
             _playbackState.value = PlaybackState.Idle
+            player?.clearMediaItems()
             return
         }
 
-        // Resolve assetId → URI via the AssetRepository
-        val assetResult = assetRepository.getAssetById(firstClip.assetId)
-        if (assetResult is AppResult.Error) {
-            Logger.e(TAG, "Asset not found for clip: ${firstClip.assetId}")
-            _playbackState.value = PlaybackState.Error(
-                Exception("Asset not found"), "Cannot load preview"
-            )
-            return
+        timelineClips = clips
+
+        val mediaItems = mutableListOf<MediaItem>()
+        for (clip in clips) {
+            // Resolve assetId -> URI via AssetRepository
+            val assetResult = assetRepository.getAssetById(clip.assetId)
+            if (assetResult is AppResult.Error) {
+                Logger.e(TAG, "Asset not found for clip: ${clip.assetId}")
+                _playbackState.value = PlaybackState.Error(
+                    Exception("Asset not found"), "Cannot load preview"
+                )
+                return
+            }
+            val asset = (assetResult as AppResult.Success).data
+            val uri = Uri.parse(asset.mediaUri)
+
+            val clippingConfiguration = MediaItem.ClippingConfiguration.Builder()
+                .setStartPositionMs(clip.trimStartMs)
+                .setEndPositionMs(clip.trimEndMs)
+                .build()
+
+            val mediaItem = MediaItem.Builder()
+                .setUri(uri)
+                .setClippingConfiguration(clippingConfiguration)
+                .build()
+            mediaItems.add(mediaItem)
         }
-        val asset = (assetResult as AppResult.Success).data
-        val uri = Uri.parse(asset.mediaUri)
 
-        val mediaItem = androidx.media3.common.MediaItem.fromUri(uri)
-        val exo = ensurePlayer()
-        exo.setMediaItem(mediaItem)
-        exo.prepare()
+        withContext(dispatchers.main) {
+            val exo = ensurePlayer()
+            exo.setMediaItems(mediaItems)
+            exo.prepare()
+            
+            // Apply speed of first item if exists
+            val firstClip = clips.firstOrNull()
+            if (firstClip != null) {
+                exo.setPlaybackSpeed(firstClip.speedFactor)
+            }
 
-        _playbackState.value = PlaybackState.Ready
-        Logger.d(TAG, "Timeline loaded: uri=$uri")
+            _playbackState.value = PlaybackState.Ready
+            Logger.d(TAG, "Loaded playlist with ${mediaItems.size} clips")
+        }
     }
 
     override fun play() {
         player?.let { exo ->
             exo.playWhenReady = true
             exo.play()
+            startPositionUpdates()
         }
     }
 
     override fun pause() {
         player?.pause()
+        stopPositionUpdates()
     }
 
     override fun stop() {
         player?.let { exo ->
             exo.stop()
-            exo.seekTo(0)
+            exo.seekTo(0, 0)
         }
+        stopPositionUpdates()
         _currentPositionMs.value = 0L
         _playbackState.value = PlaybackState.Ready
     }
 
     override suspend fun seekTo(positionMs: Long) {
-        player?.seekTo(positionMs)
-        _currentPositionMs.value = positionMs
+        withContext(dispatchers.main) {
+            val exo = ensurePlayer()
+            // Find the clip containing this absolute timeline position
+            var targetIndex = -1
+            var targetOffsetMs = 0L
+            for (i in timelineClips.indices) {
+                val clip = timelineClips[i]
+                if (positionMs >= clip.timelinePositionMs && positionMs <= clip.timelineEndMs) {
+                    targetIndex = i
+                    val relativeTimelineOffsetMs = positionMs - clip.timelinePositionMs
+                    targetOffsetMs = (relativeTimelineOffsetMs * clip.speedFactor).toLong()
+                    break
+                }
+            }
+
+            if (targetIndex != -1) {
+                exo.seekTo(targetIndex, targetOffsetMs)
+                _currentPositionMs.value = positionMs
+                Logger.d(TAG, "Seeked to clip $targetIndex at local offset $targetOffsetMs ms (absolute $positionMs ms)")
+            } else if (positionMs >= (timelineClips.lastOrNull()?.timelineEndMs ?: 0L)) {
+                // Seek to the very end of the playlist
+                val lastIndex = timelineClips.size - 1
+                val lastClip = timelineClips.lastOrNull()
+                if (lastClip != null && lastIndex >= 0) {
+                    val lastClipLocalDuration = lastClip.trimEndMs - lastClip.trimStartMs
+                    exo.seekTo(lastIndex, lastClipLocalDuration)
+                    _currentPositionMs.value = lastClip.timelineEndMs
+                }
+            } else {
+                exo.seekTo(0, 0)
+                _currentPositionMs.value = 0L
+            }
+        }
     }
 
     override fun release() {
+        stopPositionUpdates()
         player?.let { exo ->
             exo.release()
             Logger.d(TAG, "ExoPlayer released")
@@ -131,6 +198,32 @@ class ExoPlayerPreviewEngine @Inject constructor(
         player = null
         _playbackState.value = PlaybackState.Idle
         _currentPositionMs.value = 0L
+    }
+
+    // ── Position Polling ────────────────────────────────────────────────────
+
+    private fun startPositionUpdates() {
+        positionUpdateJob?.cancel()
+        positionUpdateJob = scope.launch(dispatchers.main) {
+            while (isActive) {
+                player?.let { exo ->
+                    val currentIdx = exo.currentMediaItemIndex
+                    val currentClip = timelineClips.getOrNull(currentIdx)
+                    if (currentClip != null) {
+                        val localOffsetMs = exo.currentPosition
+                        val absolutePositionMs = currentClip.timelinePositionMs + 
+                            (localOffsetMs / currentClip.speedFactor).toLong()
+                        _currentPositionMs.value = absolutePositionMs
+                    }
+                }
+                delay(33) // ~30 fps updates
+            }
+        }
+    }
+
+    private fun stopPositionUpdates() {
+        positionUpdateJob?.cancel()
+        positionUpdateJob = null
     }
 
     // ── Player listener ─────────────────────────────────────────────────────
@@ -144,8 +237,14 @@ class ExoPlayerPreviewEngine @Inject constructor(
                     if (player?.playWhenReady == true) PlaybackState.Playing
                     else PlaybackState.Ready
                 }
-                Player.STATE_ENDED -> PlaybackState.Ended
-                Player.STATE_IDLE -> PlaybackState.Idle
+                Player.STATE_ENDED -> {
+                    stopPositionUpdates()
+                    PlaybackState.Ended
+                }
+                Player.STATE_IDLE -> {
+                    stopPositionUpdates()
+                    PlaybackState.Idle
+                }
                 else -> PlaybackState.Idle
             }
         }
@@ -153,12 +252,27 @@ class ExoPlayerPreviewEngine @Inject constructor(
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 _playbackState.value = PlaybackState.Playing
-            } else if (player?.playbackState == Player.STATE_READY) {
-                _playbackState.value = PlaybackState.Ready
+                startPositionUpdates()
+            } else {
+                stopPositionUpdates()
+                if (player?.playbackState == Player.STATE_READY) {
+                    _playbackState.value = PlaybackState.Ready
+                }
+            }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val exo = player ?: return
+            val currentIdx = exo.currentMediaItemIndex
+            val currentClip = timelineClips.getOrNull(currentIdx)
+            if (currentClip != null) {
+                exo.setPlaybackSpeed(currentClip.speedFactor)
+                Logger.d(TAG, "Transitioned to clip $currentIdx, speed set to ${currentClip.speedFactor}x")
             }
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            stopPositionUpdates()
             Logger.e(TAG, "ExoPlayer error: ${error.message}", error)
             _playbackState.value = PlaybackState.Error(error, error.message)
         }

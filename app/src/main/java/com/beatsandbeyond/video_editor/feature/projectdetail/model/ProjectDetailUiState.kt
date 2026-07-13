@@ -14,27 +14,22 @@ sealed class ProjectDetailUiState {
 
     /**
      * Project loaded and ready for preview/editing.
-     *
-     * @param project        The loaded project.
-     * @param assets         Assets belonging to this project, in timeline order.
-     * @param playbackState  Current player state (Idle, Ready, Playing, Paused, etc.).
-     * @param currentPositionMs Current playback position in milliseconds.
-     * @param totalDurationMs   Total duration of the timeline in milliseconds.
      */
-    data class Ready(
+    data class Content(
         val project: Project,
-        val assets: List<Asset>,
-        val playbackState: PlaybackState = PlaybackState.Idle,
-        val currentPositionMs: Long = 0L,
-        val totalDurationMs: Long = 0L,
+        val assets: Map<String, Asset>,         // Keyed by assetId for O(1) lookups
+        val playbackState: PlaybackState,
+        val currentPositionMs: Long,
+        val totalDurationMs: Long,
+        val selectedClipId: String? = null,     // null = no selection
+        val canUndo: Boolean = false,
+        val canRedo: Boolean = false,
     ) : ProjectDetailUiState() {
         val isPlaying: Boolean get() = playbackState == PlaybackState.Playing
-        val primaryVideoAsset: Asset? get() = assets.firstOrNull()
     }
 
     /**
      * An unrecoverable error occurred.
-     * @param message Human-readable error description.
      */
     data class Error(val message: String) : ProjectDetailUiState()
 }

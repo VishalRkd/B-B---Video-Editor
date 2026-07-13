@@ -63,7 +63,7 @@
 
 ---
 
-## Phase 3 — Core Editing Engine ⏳
+## Phase 3 — Core Editing Engine ✅
 
 **Goal**: Users can trim, split, delete, reorder clips, and scrub the playhead.
 **This phase makes the app feel like a real video editor.**

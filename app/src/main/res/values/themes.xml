@@ -52,4 +52,44 @@
         <item name="android:textColor">@color/color_on_surface_variant</item>
     </style>
 
+    <!-- ── Context Button Styles (Phase 3) ─────────────────────────────────── -->
+    <style name="Widget_Editor_ContextButton">
+        <item name="android:layout_width">60dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:gravity">center</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:paddingVertical">8dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+    </style>
+
+    <style name="Widget_Editor_ContextButton_Icon">
+        <item name="android:layout_width">24dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:tint">@color/color_on_surface</item>
+    </style>
+
+    <style name="Widget_Editor_ContextButton_Icon_Danger">
+        <item name="android:layout_width">24dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:tint">@color/color_error</item>
+    </style>
+
+    <style name="Widget_Editor_ContextButton_Label">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:textAppearance">@style/TextAppearance.Material3.LabelSmall</item>
+        <item name="android:textColor">@color/color_on_surface_variant</item>
+    </style>
+
+    <style name="Widget_Editor_ContextButton_Label_Danger">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:textAppearance">@style/TextAppearance.Material3.LabelSmall</item>
+        <item name="android:textColor">@color/color_error</item>
+    </style>
+
 </resources>

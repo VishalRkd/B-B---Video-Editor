@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+  <!-- U-shape magnet body -->
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M5,5v6c0,3.87 3.13,7 7,7s7,-3.13 7,-7V5h-3v6c0,2.2 -1.8,4 -4,4s,-4,-1.8 -4,-4V5H5z"/>
+  <!-- Polarity color tips (Amber-orange active highlights) -->
+  <path
+      android:fillColor="#FFAF3F"
+      android:pathData="M5,3h3v2H5z M16,3h3v2h-3z"/>
+</vector>

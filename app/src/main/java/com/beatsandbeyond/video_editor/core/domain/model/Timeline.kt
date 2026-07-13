@@ -45,3 +45,51 @@ data class Timeline(
         )
     }
 }
+
+/** Finds a clip by ID across all tracks. Returns null if not found. */
+fun Timeline.findClip(clipId: String): Clip? =
+    tracks.flatMap { it.clips }.firstOrNull { it.id == clipId }
+
+/** Applies [transform] to the clip with [clipId]. Returns null if not found. */
+fun Timeline.mapClip(clipId: String, transform: (Clip) -> Clip): Timeline? {
+    var found = false
+    val updatedTracks = tracks.map { track ->
+        val updatedClips = track.clips.map { clip ->
+            if (clip.id == clipId) {
+                found = true
+                transform(clip)
+            } else clip
+        }
+        track.copy(clips = updatedClips)
+    }
+    return if (found) copy(tracks = updatedTracks) else null
+}
+
+/** Replaces the clip with [clipId] with [newClips]. Returns null if not found. */
+fun Timeline.replaceClip(clipId: String, newClips: List<Clip>): Timeline? {
+    var found = false
+    val updatedTracks = tracks.map { track ->
+        val clipIndex = track.clips.indexOfFirst { it.id == clipId }
+        if (clipIndex >= 0) {
+            found = true
+            track.copy(clips = track.clips.toMutableList().apply {
+                removeAt(clipIndex)
+                addAll(clipIndex, newClips)
+            })
+        } else track
+    }
+    return if (found) copy(tracks = updatedTracks) else null
+}
+
+/** Removes the clip with [clipId]. Returns null if not found. */
+fun Timeline.removeClip(clipId: String): Timeline? {
+    var found = false
+    val updatedTracks = tracks.map { track ->
+        val newClips = track.clips.filter { it.id != clipId }
+        if (newClips.size < track.clips.size) {
+            found = true
+            track.copy(clips = newClips)
+        } else track
+    }
+    return if (found) copy(tracks = updatedTracks) else null
+}

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<HorizontalScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/contextToolbarScroll"
+    android:layout_width="match_parent"
+    android:layout_height="@dimen/editor_context_toolbar_height"
+    android:background="@color/color_surface"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="@dimen/spacing_sm">
+
+        <!-- Split -->
+        <LinearLayout
+            android:id="@+id/btnSplit"
+            style="@style/Widget_Editor_ContextButton">
+            <ImageView
+                android:src="@drawable/ic_split"
+                style="@style/Widget_Editor_ContextButton_Icon" />
+            <TextView
+                android:text="@string/editor_split"
+                style="@style/Widget_Editor_ContextButton_Label" />
+        </LinearLayout>
+
+        <!-- Trim -->
+        <LinearLayout
+            android:id="@+id/btnTrim"
+            style="@style/Widget_Editor_ContextButton">
+            <ImageView
+                android:src="@drawable/ic_trim"
+                style="@style/Widget_Editor_ContextButton_Icon" />
+            <TextView
+                android:text="@string/editor_trim"
+                style="@style/Widget_Editor_ContextButton_Label" />
+        </LinearLayout>
+
+        <!-- Speed -->
+        <LinearLayout
+            android:id="@+id/btnSpeed"
+            style="@style/Widget_Editor_ContextButton">
+            <ImageView
+                android:src="@drawable/ic_speed"
+                style="@style/Widget_Editor_ContextButton_Icon" />
+            <TextView
+                android:text="@string/editor_speed"
+                style="@style/Widget_Editor_ContextButton_Label" />
+        </LinearLayout>
+
+        <!-- Volume -->
+        <LinearLayout
+            android:id="@+id/btnVolume"
+            style="@style/Widget_Editor_ContextButton">
+            <ImageView
+                android:src="@drawable/ic_volume"
+                style="@style/Widget_Editor_ContextButton_Icon" />
+            <TextView
+                android:text="@string/editor_volume"
+                style="@style/Widget_Editor_ContextButton_Label" />
+        </LinearLayout>
+
+        <!-- Filter -->
+        <LinearLayout
+            android:id="@+id/btnFilter"
+            style="@style/Widget_Editor_ContextButton">
+            <ImageView
+                android:src="@drawable/ic_filter"
+                style="@style/Widget_Editor_ContextButton_Icon" />
+            <TextView
+                android:text="@string/editor_filter"
+                style="@style/Widget_Editor_ContextButton_Label" />
+        </LinearLayout>
+
+        <!-- Adjust -->
+        <LinearLayout
+            android:id="@+id/btnAdjust"
+            style="@style/Widget_Editor_ContextButton">
+            <ImageView
+                android:src="@drawable/ic_adjust"
+                style="@style/Widget_Editor_ContextButton_Icon" />
+            <TextView
+                android:text="@string/editor_adjust"
+                style="@style/Widget_Editor_ContextButton_Label" />
+        </LinearLayout>
+
+        <!-- Delete -->
+        <LinearLayout
+            android:id="@+id/btnDelete"
+            style="@style/Widget_Editor_ContextButton">
+            <ImageView
+                android:src="@drawable/ic_delete"
+                style="@style/Widget_Editor_ContextButton_Icon_Danger" />
+            <TextView
+                android:text="@string/editor_delete"
+                style="@style/Widget_Editor_ContextButton_Label_Danger" />
+        </LinearLayout>
+
+    </LinearLayout>
+</HorizontalScrollView>
