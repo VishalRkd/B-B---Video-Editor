@@ -5,11 +5,13 @@ import com.beatsandbeyond.video_editor.core.data.engine.KotlinTimelineEngine
 import com.beatsandbeyond.video_editor.core.data.engine.AndroidMediaEngine
 import com.beatsandbeyond.video_editor.core.data.engine.AndroidAudioEngine
 import com.beatsandbeyond.video_editor.core.data.engine.MediaCodecExportEngine
+import com.beatsandbeyond.video_editor.core.data.engine.AndroidEffectsEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.PreviewEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.TimelineEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.MediaEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.AudioEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.ExportEngine
+import com.beatsandbeyond.video_editor.core.domain.engine.EffectsEngine
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -52,4 +54,10 @@ abstract class EngineModule {
     abstract fun bindExportEngine(
         impl: MediaCodecExportEngine,
     ): ExportEngine
+
+    @Binds
+    @Singleton
+    abstract fun bindEffectsEngine(
+        impl: AndroidEffectsEngine,
+    ): EffectsEngine
 }

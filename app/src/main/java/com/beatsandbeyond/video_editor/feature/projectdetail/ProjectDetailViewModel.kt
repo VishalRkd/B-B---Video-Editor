@@ -35,6 +35,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.BufferOverflow
 import java.util.UUID
 import javax.inject.Inject
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import com.beatsandbeyond.video_editor.core.data.local.worker.ExportWorker
 
 /**
  * ViewModel for the Project Detail / Editor screen.
@@ -179,6 +185,10 @@ class ProjectDetailViewModel @Inject constructor(
     fun togglePlayPause() {
         val content = currentContent ?: return
         if (content.isPlaying) previewEngine.pause() else previewEngine.play()
+    }
+
+    fun pause() {
+        previewEngine.pause()
     }
 
     fun seekTo(positionMs: Long) {
@@ -504,19 +514,72 @@ class ProjectDetailViewModel @Inject constructor(
     // ── Phase 6: Export ──────────────────────────────────────────────────────
 
     /** Starts exporting the current project with the given [config]. Progress is emitted
-     *  via [exportProgress]. Safe to call once; the engine handles cancellation. */
+     *  via [exportProgress]. Runs inside a persistent WorkManager foreground worker. */
     fun startExport(config: ExportConfig) {
         val project = currentProject ?: return
-        launchSafely {
-            exportEngine.export(project, config).collect { progress ->
-                _exportProgress.emit(progress)
+        val workData = workDataOf(
+            ExportWorker.KEY_PROJECT_ID to project.id,
+            ExportWorker.KEY_OUTPUT_PATH to config.outputPath,
+            ExportWorker.KEY_RESOLUTION_WIDTH to config.resolution.width,
+            ExportWorker.KEY_RESOLUTION_HEIGHT to config.resolution.height,
+            ExportWorker.KEY_FRAME_RATE to config.frameRate,
+            ExportWorker.KEY_VIDEO_BITRATE to config.videoBitrateBps,
+            ExportWorker.KEY_AUDIO_BITRATE to config.audioBitrateBps,
+            ExportWorker.KEY_FORMAT to config.format.name
+        )
+
+        val exportWorkRequest = OneTimeWorkRequestBuilder<ExportWorker>()
+            .setInputData(workData)
+            .addTag("export_work_${project.id}")
+            .build()
+
+        val workManager = WorkManager.getInstance(context)
+        workManager.enqueueUniqueWork(
+            "export_unique_work_${project.id}",
+            ExistingWorkPolicy.REPLACE,
+            exportWorkRequest
+        )
+
+        viewModelScope.launch {
+            workManager.getWorkInfoByIdFlow(exportWorkRequest.id).collect { workInfo ->
+                if (workInfo != null) {
+                    when (workInfo.state) {
+                        WorkInfo.State.ENQUEUED -> {
+                            _exportProgress.emit(ExportProgress.Started)
+                        }
+                        WorkInfo.State.RUNNING -> {
+                            val progressData = workInfo.progress
+                            val stateName = progressData.getString(ExportWorker.KEY_STATE)
+                            if (stateName == "IN_PROGRESS") {
+                                val fraction = progressData.getFloat(ExportWorker.KEY_PROGRESS_FRACTION, 0f)
+                                val frameMs = progressData.getLong(ExportWorker.KEY_FRAME_MS, 0L)
+                                _exportProgress.emit(ExportProgress.InProgress(fraction, frameMs))
+                            } else {
+                                _exportProgress.emit(ExportProgress.Started)
+                            }
+                        }
+                        WorkInfo.State.SUCCEEDED -> {
+                            val outputPathResult = workInfo.outputData.getString(ExportWorker.KEY_COMPLETED_PATH) ?: config.outputPath
+                            _exportProgress.emit(ExportProgress.Completed(outputPathResult, 0L))
+                        }
+                        WorkInfo.State.FAILED -> {
+                            val error = workInfo.outputData.getString(ExportWorker.KEY_ERROR) ?: "Export failed"
+                            _exportProgress.emit(ExportProgress.Failed(Exception(error)))
+                        }
+                        WorkInfo.State.CANCELLED -> {
+                            _exportProgress.emit(ExportProgress.Cancelled)
+                        }
+                        else -> {}
+                    }
+                }
             }
         }
     }
 
     /** Requests cancellation of an in-progress export. */
     fun cancelExport() {
-        exportEngine.cancel()
+        val project = currentProject ?: return
+        WorkManager.getInstance(context).cancelUniqueWork("export_unique_work_${project.id}")
     }
 
     /**
@@ -644,10 +707,10 @@ class ProjectDetailViewModel @Inject constructor(
         }
     }
 
-    fun importMedia(uri: Uri, mediaType: MediaType) {
+    fun importMedia(uri: Uri, mediaType: MediaType, customPositionMs: Long? = null) {
         val content = currentContent ?: return
         val project = currentProject ?: return
-        val playheadPosition = content.currentPositionMs
+        val playheadPosition = customPositionMs ?: content.currentPositionMs
 
         launchSafely {
             _uiState.update { state ->

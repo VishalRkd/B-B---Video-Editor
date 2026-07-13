@@ -234,3 +234,22 @@ This file records significant architectural decisions, the alternatives consider
 - Storing to database and serialization/deserialization on every touch drag event (which triggers multiple times per millisecond) is extremely heavy and results in massive UI stutter and lag.
 - Deferring the disk write to gesture completion maintains a smooth 60fps interaction during the scrub, while ensuring data integrity.
 - Intermediate drag states do not pollute the undo/redo stack, so undoing a trim operation reverts the whole drag action in one step instead of multiple micro-frames.
+
+---
+
+## ADR-014: WorkManager for Background Export Execution
+
+**Date**: Phase 3  
+**Status**: Active
+
+**Decision**: Integrate `androidx.work:work-runtime-ktx` to manage video export operations inside a WorkManager `CoroutineWorker` (`ExportWorker`).
+
+**Alternatives Considered**:
+- Run export inside ViewModel `viewModelScope` (status quo, process gets killed on backgrounding)
+- Run export inside an Android Bound/Started Service
+
+**Rationale**:
+- Foreground Services are prone to strict OS limitations and require extensive boilerplate.
+- WorkManager is the recommended Jetpack library for persistent work. It guarantees execution even if the app process is killed or the device restarts.
+- By promoting the `ExportWorker` to a foreground service via `setForeground()`, it gets high-priority execution, survives backgrounding, and provides user progress updates via system notifications.
+- Observable `WorkInfo` flows simplify tracking progress and handling cancellation directly from the ViewModel.

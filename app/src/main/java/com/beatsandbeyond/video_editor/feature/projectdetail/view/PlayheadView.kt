@@ -30,9 +30,14 @@ class PlayheadView @JvmOverloads constructor(
     }
 
     private val bubbleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = ContextCompat.getColor(context, R.color.white)
+        color = Color.parseColor("#00D4AA") // Electric green bubble border matching text
         strokeWidth = 3f
         style = Paint.Style.STROKE
+    }
+
+    private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.FILL
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -54,7 +59,8 @@ class PlayheadView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        playheadX = w / 2f
+        val labelWidth = resources.getDimension(R.dimen.timeline_track_label_width)
+        playheadX = labelWidth + (w - labelWidth) / 2f
     }
 
     fun setPlayheadTime(ms: Long) {
@@ -67,12 +73,12 @@ class PlayheadView @JvmOverloads constructor(
         val h = height.toFloat()
 
         val rulerHeight = resources.getDimension(R.dimen.timeline_ruler_height) // 24dp
-        val bubbleWidth = resources.getDimension(R.dimen.timeline_track_label_width) * 0.7f // ~56dp
-        val bubbleHeight = rulerHeight * 0.8f // ~19dp
-        val cornerRadius = 8f
+        val bubbleWidth = 72f * resources.displayMetrics.density // Spans 72dp width to fit fractions of second comfortably
+        val bubbleHeight = rulerHeight * 0.85f // ~20dp
+        val cornerRadius = 8f * resources.displayMetrics.density // Smooth rounded corners
 
-        // Draw vertical playhead line starting from the bottom of the ruler (24dp)
-        canvas.drawLine(playheadX, rulerHeight, playheadX, h, linePaint)
+        // Draw vertical playhead line starting from the bottom of the handle tip (rulerHeight + 12f)
+        canvas.drawLine(playheadX, rulerHeight + 12f, playheadX, h, linePaint)
 
         // Setup boundary box for top capsule
         bubbleRect.set(
@@ -82,41 +88,49 @@ class PlayheadView @JvmOverloads constructor(
             bubbleHeight
         )
 
-        // Construct custom capsule shape with a downward pointer at the center bottom
+        // Rounded rect path for the capsule
         path.reset()
-        path.moveTo(bubbleRect.left + cornerRadius, bubbleRect.top)
-        path.lineTo(bubbleRect.right - cornerRadius, bubbleRect.top)
-        path.quadTo(bubbleRect.right, bubbleRect.top, bubbleRect.right, bubbleRect.top + cornerRadius)
-        path.lineTo(bubbleRect.right, bubbleRect.bottom - cornerRadius)
-        path.quadTo(bubbleRect.right, bubbleRect.bottom, bubbleRect.right - cornerRadius, bubbleRect.bottom)
-        
-        // Downward pointer tip centered under playhead line
-        path.lineTo(playheadX + 6f, bubbleRect.bottom)
-        path.lineTo(playheadX, rulerHeight - 2f)
-        path.lineTo(playheadX - 6f, bubbleRect.bottom)
-        
-        path.lineTo(bubbleRect.left + cornerRadius, bubbleRect.bottom)
-        path.quadTo(bubbleRect.left, bubbleRect.bottom, bubbleRect.left, bubbleRect.bottom - cornerRadius)
-        path.lineTo(bubbleRect.left, bubbleRect.top + cornerRadius)
-        path.quadTo(bubbleRect.left, bubbleRect.top, bubbleRect.left + cornerRadius, bubbleRect.top)
-        path.close()
+        path.addRoundRect(bubbleRect, cornerRadius, cornerRadius, Path.Direction.CW)
 
         // Draw background shape
         canvas.drawPath(path, bubblePaint)
         
-        // Draw white border outline
+        // Draw green border outline
         canvas.drawPath(path, bubbleBorderPaint)
 
         // Draw formatted timecode text centered in the bubble
         val formattedTime = formatTime(timeMs)
         val textY = (bubbleRect.top + bubbleRect.bottom) / 2f - (textPaint.descent() + textPaint.ascent()) / 2f
         canvas.drawText(formattedTime, playheadX, textY, textPaint)
+
+        // Draw the white downward teardrop handle pointing down
+        val handlePath = Path()
+        val handleWidth = 8f * resources.displayMetrics.density
+        val handleHeight = 8f * resources.displayMetrics.density
+        val handleTop = rulerHeight - 2f
+        
+        handlePath.reset()
+        handlePath.moveTo(playheadX, handleTop)
+        handlePath.cubicTo(
+            playheadX - handleWidth, handleTop,
+            playheadX - handleWidth, handleTop + handleHeight,
+            playheadX, handleTop + handleHeight + 4f
+        )
+        handlePath.cubicTo(
+            playheadX + handleWidth, handleTop + handleHeight,
+            playheadX + handleWidth, handleTop,
+            playheadX, handleTop
+        )
+        handlePath.close()
+
+        canvas.drawPath(handlePath, handlePaint)
     }
 
     private fun formatTime(ms: Long): String {
         val totalSecs = ms / 1000
         val mins = totalSecs / 60
         val secs = totalSecs % 60
-        return "%02d:%02d".format(mins, secs)
+        val hundredths = (ms % 1000) / 10
+        return "%02d:%02d.%02d".format(mins, secs, hundredths)
     }
 }

@@ -25,6 +25,7 @@ data class Transition(
  * Future: each enum value maps to a concrete shader or animation in [EffectsEngine].
  */
 enum class TransitionType {
+    CROSSFADE,
     CUT,
     DISSOLVE,
     FADE_IN,

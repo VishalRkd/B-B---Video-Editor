@@ -65,29 +65,64 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     private var isRenderingTracks = false
     private var lastRenderSignature: String? = null
     private var isGestureActive = false
+    private var pendingImportPositionMs: Long? = null
+
+    private lateinit var scaleDetector: ScaleGestureDetector
+    private var lastScrollTime = 0L
+    private var lastScrollX = 0
+    private var isScrollingFast = false
+    private var cachedSnapTargets: List<Long> = emptyList()
+    private val scrollStopRunnable = Runnable {
+        isScrollingFast = false
+        val scrollX = binding.timelineHorizontalScroll.scrollX
+        val viewportWidth = binding.timelineHorizontalScroll.width
+        laneControllers.values.forEach { it.updateViewport(scrollX, viewportWidth, isScrollingFast = false) }
+    }
+    private val scrollHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val pickVideoLauncher = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.VIDEO)
+            try {
+                val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                requireContext().contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                com.beatsandbeyond.video_editor.core.utils.Logger.w("ProjectDetailFragment", "Failed to take persistable URI permission for video", e)
+            }
+            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.VIDEO, pendingImportPositionMs)
         }
+        pendingImportPositionMs = null
     }
 
     private val pickAudioLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.AUDIO)
+            try {
+                val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                requireContext().contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                com.beatsandbeyond.video_editor.core.utils.Logger.w("ProjectDetailFragment", "Failed to take persistable URI permission for audio", e)
+            }
+            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.AUDIO, pendingImportPositionMs)
         }
+        pendingImportPositionMs = null
     }
 
     private val pickOverlayLauncher = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.IMAGE)
+            try {
+                val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                requireContext().contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                com.beatsandbeyond.video_editor.core.utils.Logger.w("ProjectDetailFragment", "Failed to take persistable URI permission for overlay", e)
+            }
+            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.IMAGE, pendingImportPositionMs)
         }
+        pendingImportPositionMs = null
     }
 
     override fun inflateBinding(
@@ -98,6 +133,15 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        scaleDetector = ScaleGestureDetector(requireContext(), object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                if (isGestureActive) return false
+                isScrollingFast = true // Treat scaling as rapid scroll to throttle Coil loads
+                zoomTimeline(detector.scaleFactor, detector.focusX)
+                return true
+            }
+        })
+
         setupToolbar()
         setupSystemBarInsets()
         setupSurface()
@@ -186,6 +230,11 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         }
 
         binding.timelineHorizontalScroll.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            if (scaleDetector.isInProgress) {
+                return@setOnTouchListener true
+            }
+
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     isUserScrolling = true
@@ -200,15 +249,29 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     val scrollX = binding.timelineHorizontalScroll.scrollX
                     val timeMs = (scrollX / pixelsPerMs).toLong()
                     viewModel.seekTo(timeMs)
+                    
+                    scrollHandler.post(scrollStopRunnable)
                 }
             }
             false
         }
 
         binding.timelineHorizontalScroll.setOnScrollChangeListener { _, scrollX, _, _, _ ->
+            scrollHandler.removeCallbacks(scrollStopRunnable)
+            
+            val currentTime = System.currentTimeMillis()
+            val dt = currentTime - lastScrollTime
+            if (dt > 0) {
+                val dx = Math.abs(scrollX - lastScrollX)
+                val velocity = dx.toFloat() / dt
+                isScrollingFast = velocity > 1.5f
+            }
+            lastScrollTime = currentTime
+            lastScrollX = scrollX
+
             // Update viewport for virtualization
             val viewportWidth = binding.timelineHorizontalScroll.width
-            laneControllers.values.forEach { it.updateViewport(scrollX, viewportWidth) }
+            laneControllers.values.forEach { it.updateViewport(scrollX, viewportWidth, isScrollingFast) }
 
             val timeMs = (scrollX / pixelsPerMs).toLong()
             binding.timelineRuler.setScrollOffsetMs(timeMs)
@@ -224,6 +287,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             if (state is ProjectDetailUiState.Content && !state.isPlaying && isUserScrolling) {
                 viewModel.seekTo(timeMs)
             }
+            
+            scrollHandler.postDelayed(scrollStopRunnable, 150)
         }
     }
 
@@ -687,8 +752,24 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     /**
      * Re-renders the lanes only when something structural changed (project, selection, zoom),
      * not on every playback position tick.
+     *
+     * HAND-TRACED DRAG LIFECYCLE:
+     * 1. ACTION_DOWN:
+     *    - sets isGestureActive = true.
+     *    - caches basePositions, groupMinDeltaMs, groupMaxDeltaMs, and cachedSnapTargets.
+     * 2. ACTION_MOVE:
+     *    - directly translates view marginStart / width (smooth 60fps).
+     *    - calls viewModel.moveSelectedClips/trimSelectedClip(isFinal=false), updating ViewModel state in-memory.
+     *    - position ticks from ExoPlayer emit new UiState.Content:
+     *        - calls renderTracksIfChanged().
+     *        - isGestureActive is true -> returns early (stops layout reconstructs / OnTouchListener resets).
+     * 3. ACTION_UP / ACTION_CANCEL:
+     *    - sets isGestureActive = false.
+     *    - calls viewModel.moveSelectedClips/trimSelectedClip(isFinal=true), which commits to Room and emits final state.
+     *    - renderTracksIfChanged() runs because isGestureActive is now false, rebuilding to match Room.
      */
     private fun renderTracksIfChanged(state: ProjectDetailUiState.Content) {
+        if (isGestureActive) return
         val signature = "${state.project.updatedAt}:${state.selectedClipId}:${state.selectedClipIds.joinToString()}:$pixelsPerMs"
         if (signature == lastRenderSignature) return
         lastRenderSignature = signature
@@ -729,6 +810,21 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         onClipClick = { clipId -> viewModel.selectClip(clipId) },
                         onClipLongClick = { clipId -> viewModel.toggleClipSelection(clipId) },
                         trackType = track.type,
+                        onPlusClick = { positionMs ->
+                            pendingImportPositionMs = positionMs
+                            when (track.type) {
+                                com.beatsandbeyond.video_editor.core.domain.model.TrackType.VIDEO -> {
+                                    pickVideoLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly))
+                                }
+                                com.beatsandbeyond.video_editor.core.domain.model.TrackType.AUDIO -> {
+                                    pickAudioLauncher.launch("audio/*")
+                                }
+                                com.beatsandbeyond.video_editor.core.domain.model.TrackType.OVERLAY -> {
+                                    pickOverlayLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                                }
+                                else -> {}
+                            }
+                        }
                     ).apply {
                         updateViewport(binding.timelineHorizontalScroll.scrollX, binding.timelineHorizontalScroll.width)
                     }
@@ -870,6 +966,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         // currentProject, so a re-read would return the already-moved position and
         // double-apply the delta, making clips jump away from the finger.
         var basePositions: Map<String, Long> = emptyMap()
+        var groupMinDeltaMs = Long.MIN_VALUE
+        var groupMaxDeltaMs = Long.MAX_VALUE
         val touchSlop = ViewConfiguration.get(clipView.context).scaledTouchSlop
         var isDragging = false
 
@@ -884,12 +982,58 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     isGestureActive = true
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     val state = viewModel.uiState.value
-                    basePositions = if (state is ProjectDetailUiState.Content) {
-                        state.selectedClipIds.associateWith { id ->
+                    if (state is ProjectDetailUiState.Content) {
+                        basePositions = state.selectedClipIds.associateWith { id ->
                             viewModel.getClip(id)?.timelinePositionMs ?: 0L
                         }
+
+                        // Compute groupMinDeltaMs and groupMaxDeltaMs based on stationary clips on their tracks
+                        var minD = Long.MIN_VALUE
+                        var maxD = Long.MAX_VALUE
+                        state.selectedClipIds.forEach { id ->
+                            val c = viewModel.getClip(id) ?: return@forEach
+                            val base = basePositions[id] ?: 0L
+                            val trackType = state.project.timeline.trackTypeOf(id) ?: return@forEach
+                            val track = state.project.timeline.tracks.firstOrNull { it.type == trackType } ?: return@forEach
+                            val stationary = track.clips.filter { it.id !in state.selectedClipIds }
+                            
+                            var clipMinD = -base
+                            var clipMaxD = Long.MAX_VALUE
+                            
+                            stationary.forEach { other ->
+                                if (other.timelineEndMs <= base) {
+                                    clipMinD = kotlin.math.max(clipMinD, other.timelineEndMs - base)
+                                }
+                                if (other.timelinePositionMs >= base + c.durationOnTimelineMs) {
+                                    clipMaxD = kotlin.math.min(clipMaxD, other.timelinePositionMs - c.durationOnTimelineMs - base)
+                                }
+                            }
+                            minD = kotlin.math.max(minD, clipMinD)
+                            maxD = kotlin.math.min(maxD, clipMaxD)
+                        }
+                        groupMinDeltaMs = minD
+                        groupMaxDeltaMs = maxD
                     } else {
-                        emptyMap()
+                        basePositions = emptyMap()
+                        groupMinDeltaMs = Long.MIN_VALUE
+                        groupMaxDeltaMs = Long.MAX_VALUE
+                    }
+
+                    // Build and cache snap targets across all lanes once per gesture
+                    if (state is ProjectDetailUiState.Content && isMagnetEnabled) {
+                        val targets = mutableListOf<Long>()
+                        state.project.timeline.tracks.forEach { track ->
+                            track.clips.forEach { clip ->
+                                if (clip.id !in state.selectedClipIds) {
+                                    targets.add(clip.timelinePositionMs)
+                                    targets.add(clip.timelineEndMs)
+                                }
+                            }
+                        }
+                        targets.add(state.currentPositionMs) // playhead
+                        cachedSnapTargets = targets
+                    } else {
+                        cachedSnapTargets = emptyList()
                     }
                     true
                 }
@@ -906,7 +1050,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         )
                         updateSnapIndicator(snappedTarget, (startPositionVal + rawDeltaMs))
                         val snappedDelta = snappedTarget - startPositionVal
-                        val appliedDelta = snappedDelta - lastDeltaMs
+                        val clampedDelta = snappedDelta.coerceIn(groupMinDeltaMs, groupMaxDeltaMs)
+                        val appliedDelta = clampedDelta - lastDeltaMs
                         if (appliedDelta != 0L) {
                             // Direct view manipulation for ALL selected clips (group drag).
                             // Drive from captured base positions + absolute snapped target.
@@ -915,12 +1060,12 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                                 state.selectedClipIds.forEach { id ->
                                     val base = basePositions[id] ?: return@forEach
                                     laneControllers[state.project.timeline.trackTypeOf(id)]?.setClipPosition(
-                                        id, base + snappedDelta
+                                        id, base + clampedDelta
                                     )
                                 }
                             }
                             viewModel.moveSelectedClips(appliedDelta, isFinal = false)
-                            lastDeltaMs = snappedDelta
+                            lastDeltaMs = clampedDelta
                         }
                     }
                     true
@@ -936,6 +1081,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     }
                     isGestureActive = false
                     basePositions = emptyMap()
+                    groupMinDeltaMs = Long.MIN_VALUE
+                    groupMaxDeltaMs = Long.MAX_VALUE
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
@@ -967,14 +1114,30 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         return "%02d:%02d".format(mins, secs)
     }
 
-    private fun zoomTimeline(factor: Float) {
+    private fun zoomTimeline(factor: Float, focalX: Float) {
+        val scrollX = binding.timelineHorizontalScroll.scrollX
+        val timeMs = (scrollX + focalX - timelinePadding) / pixelsPerMs
+        
         val newZoom = (pixelsPerMs * factor).coerceIn(minPixelsPerMs, maxPixelsPerMs)
+        if (newZoom == pixelsPerMs) return
         pixelsPerMs = newZoom
-        lastRenderSignature = null // force re-render at new zoom
+        
+        binding.timelineRuler.setPixelsPerMs(pixelsPerMs)
+        
         val state = viewModel.uiState.value
         if (state is ProjectDetailUiState.Content) {
+            val totalTimelineWidth = (state.totalDurationMs * pixelsPerMs).toInt()
+            binding.tracksContainer.layoutParams = binding.tracksContainer.layoutParams.apply {
+                width = totalTimelineWidth
+            }
+            binding.timelineRuler.setDurationMs(state.totalDurationMs)
+            binding.timelineRuler.setViewportWidth(binding.timelineHorizontalScroll.width)
+            
             renderTracks(state)
         }
+        
+        val newScrollX = (timeMs * pixelsPerMs - focalX + timelinePadding).toInt().coerceAtLeast(0)
+        binding.timelineHorizontalScroll.scrollTo(newScrollX, 0)
     }
 
     /**
@@ -983,21 +1146,11 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
      */
     private fun snapPosition(candidateMs: Long, excludeClipId: String?): Long {
         if (!isMagnetEnabled) return candidateMs
-        val state = viewModel.uiState.value
-        if (state !is ProjectDetailUiState.Content) return candidateMs
-
-        val snapTargets = mutableListOf<Long>()
-        state.project.timeline.primaryVideoTrack?.clips?.forEach { clip ->
-            if (clip.id != excludeClipId) {
-                snapTargets.add(clip.timelinePositionMs)
-                snapTargets.add(clip.timelineEndMs)
-            }
-        }
-        snapTargets.add(state.currentPositionMs)
+        if (cachedSnapTargets.isEmpty()) return candidateMs
 
         var best = candidateMs
         var bestDist = snapThresholdMs
-        for (target in snapTargets) {
+        for (target in cachedSnapTargets) {
             val dist = kotlin.math.abs(target - candidateMs)
             if (dist < bestDist) {
                 bestDist = dist
@@ -1020,5 +1173,16 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         } else {
             binding.snapIndicator.visibility = View.GONE
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        viewModel.pause()
+    }
+
+    override fun onDestroyView() {
+        viewModel.pause()
+        viewModel.onSurfaceDestroyed()
+        super.onDestroyView()
     }
 }

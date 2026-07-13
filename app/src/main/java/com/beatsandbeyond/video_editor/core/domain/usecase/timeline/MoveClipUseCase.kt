@@ -35,6 +35,7 @@ class MoveClipUseCase @Inject constructor(
         }
 
         val updatedTimeline = timelineEngine.moveClip(project.timeline, clipId, newTimelinePositionMs)
+            ?: return AppResult.Error(IllegalStateException("Clips cannot overlap on the same track"))
         return AppResult.Success(project.copy(
             timeline = updatedTimeline,
             updatedAt = System.currentTimeMillis(),

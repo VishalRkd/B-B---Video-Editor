@@ -70,7 +70,7 @@ class AddAudioTrackUseCaseTest {
         val timeline = Timeline(id = "t", tracks = listOf(existing))
         val proj = project.copy(timeline = timeline)
 
-        val result = useCase(proj, audioAsset)
+        val result = useCase(proj, audioAsset, timelinePositionMs = 10000L)
         assertTrue(result is AppResult.Success)
         val audioTrack = (result as AppResult.Success).data.timeline.tracks.first { it.type == TrackType.AUDIO }
         assertEquals(2, audioTrack.clips.size)

@@ -1,6 +1,9 @@
 package com.beatsandbeyond.video_editor
 
 import android.app.Application
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import dagger.hilt.android.HiltAndroidApp
 
 /**
@@ -17,11 +20,24 @@ import dagger.hilt.android.HiltAndroidApp
  * - Set up global exception handling
  */
 @HiltAndroidApp
-class BBVideoEditorApp : Application() {
+class BBVideoEditorApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
         // Future: Initialize Timber for logging in debug builds
         // Future: Initialize Firebase, analytics, etc.
+    }
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .memoryCache {
+                coil.memory.MemoryCache.Builder(this)
+                    .maxSizePercent(0.25) // 25% of available RAM
+                    .build()
+            }
+            .build()
     }
 }

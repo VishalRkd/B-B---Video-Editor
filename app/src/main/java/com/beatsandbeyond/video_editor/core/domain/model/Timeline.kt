@@ -11,10 +11,12 @@ package com.beatsandbeyond.video_editor.core.domain.model
  *
  * @param id     Unique identifier.
  * @param tracks Ordered list of tracks. Index 0 is the primary video track.
+ * @param transitions List of transitions between clips in the timeline.
  */
 data class Timeline(
     val id: String,
     val tracks: List<Track> = emptyList(),
+    val transitions: List<Transition> = emptyList(),
 ) {
     /**
      * The total duration of the timeline in milliseconds.

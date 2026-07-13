@@ -5,12 +5,19 @@ import android.net.Uri
 import android.view.Surface
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ClippingMediaSource
+import androidx.media3.exoplayer.source.ConcatenatingMediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.SilenceMediaSource
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.engine.PreviewEngine
 import com.beatsandbeyond.video_editor.core.domain.model.Clip
 import com.beatsandbeyond.video_editor.core.domain.model.PlaybackState
 import com.beatsandbeyond.video_editor.core.domain.model.Timeline
+import com.beatsandbeyond.video_editor.core.domain.model.TrackType
 import com.beatsandbeyond.video_editor.core.domain.repository.AssetRepository
 import com.beatsandbeyond.video_editor.core.utils.CoroutineDispatchers
 import com.beatsandbeyond.video_editor.core.utils.Logger
@@ -91,7 +98,12 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
         timelineClips = clips
 
-        val mediaItems = mutableListOf<MediaItem>()
+        val dataSourceFactory = DefaultDataSource.Factory(context)
+        val concatenatingSource = ConcatenatingMediaSource()
+
+        val audioTrack = timeline.tracks.firstOrNull { it.type == TrackType.AUDIO }
+        val audioClips = audioTrack?.clips ?: emptyList()
+
         for (clip in clips) {
             // Resolve assetId -> URI via AssetRepository
             val assetResult = assetRepository.getAssetById(clip.assetId)
@@ -105,16 +117,64 @@ class ExoPlayerPreviewEngine @Inject constructor(
             val asset = (assetResult as AppResult.Success).data
             val uri = Uri.parse(asset.mediaUri)
 
-            val clippingConfiguration = MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(clip.trimStartMs)
-                .setEndPositionMs(clip.trimEndMs)
-                .build()
+            val videoMediaItem = MediaItem.Builder().setUri(uri).build()
+            val videoSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                .createMediaSource(videoMediaItem)
+            val clippedVideo = ClippingMediaSource(
+                videoSource,
+                clip.trimStartMs * 1000L,
+                clip.trimEndMs * 1000L
+            )
 
-            val mediaItem = MediaItem.Builder()
-                .setUri(uri)
-                .setClippingConfiguration(clippingConfiguration)
-                .build()
-            mediaItems.add(mediaItem)
+            val sourcesToMerge = mutableListOf<androidx.media3.exoplayer.source.MediaSource>()
+            sourcesToMerge.add(clippedVideo)
+
+            val vStart = clip.timelinePositionMs
+            val vEnd = clip.timelineEndMs
+
+            for (ac in audioClips) {
+                val aStart = ac.timelinePositionMs
+                val aEnd = ac.timelineEndMs
+
+                val oStart = maxOf(vStart, aStart)
+                val oEnd = minOf(vEnd, aEnd)
+
+                if (oStart < oEnd) {
+                    val dOffsetMs = oStart - vStart
+                    val audioStartMs = ac.trimStartMs + ((oStart - aStart) * ac.speedFactor).toLong()
+                    val audioDurationMs = oEnd - oStart
+                    val audioEndMs = audioStartMs + (audioDurationMs * ac.speedFactor).toLong()
+
+                    val audioAssetResult = assetRepository.getAssetById(ac.assetId)
+                    if (audioAssetResult is AppResult.Success) {
+                        val audioAsset = audioAssetResult.data
+                        val audioUri = Uri.parse(audioAsset.mediaUri)
+                        val audioMediaItem = MediaItem.Builder().setUri(audioUri).build()
+                        val audioSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+                            .createMediaSource(audioMediaItem)
+                        val clippedAudio = ClippingMediaSource(
+                            audioSource,
+                            audioStartMs * 1000L,
+                            audioEndMs * 1000L
+                        )
+
+                        val finalAudioSource = if (dOffsetMs > 0) {
+                            val silence = SilenceMediaSource(dOffsetMs * 1000L)
+                            ConcatenatingMediaSource(silence, clippedAudio)
+                        } else {
+                            clippedAudio
+                        }
+                        sourcesToMerge.add(finalAudioSource)
+                    }
+                }
+            }
+
+            val mergedSource = if (sourcesToMerge.size > 1) {
+                MergingMediaSource(*sourcesToMerge.toTypedArray())
+            } else {
+                clippedVideo
+            }
+            concatenatingSource.addMediaSource(mergedSource)
         }
 
         withContext(dispatchers.main) {
@@ -122,7 +182,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
             val previousPositionMs = _currentPositionMs.value
             val wasPlaying = exo.playWhenReady
 
-            exo.setMediaItems(mediaItems)
+            exo.setMediaSource(concatenatingSource)
             exo.prepare()
             
             // Find target clip and offset for current timeline position
@@ -166,7 +226,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
             }
 
             _playbackState.value = if (wasPlaying) PlaybackState.Playing else PlaybackState.Ready
-            Logger.d(TAG, "Loaded playlist with ${mediaItems.size} clips. Restored position: $previousPositionMs ms (playing: $wasPlaying)")
+            Logger.d(TAG, "Loaded multi-track timeline with ${clips.size} video clips. Restored position: $previousPositionMs ms (playing: $wasPlaying)")
         }
     }
 

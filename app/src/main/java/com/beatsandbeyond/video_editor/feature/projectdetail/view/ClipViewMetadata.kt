@@ -12,4 +12,5 @@ data class ClipViewMetadata(
     val durationOnTimelineMs: Long,
     val isSelected: Boolean,
     val assetUri: String?,
+    val pixelsPerMs: Float, // Track zoom level for layout updates
 )

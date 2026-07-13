@@ -41,6 +41,7 @@ class WaveformView @JvmOverloads constructor(
 
     /** Sets the waveform from a raw normalized amplitude array ([0.0, 1.0]). */
     fun setAmplitudes(data: FloatArray?) {
+        if (amplitudes === data) return
         amplitudes = data
         invalidate()
     }

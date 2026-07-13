@@ -33,7 +33,9 @@ class TimelineLaneController(
     private val onClipClick: (String) -> Unit,
     private val onClipLongClick: (String) -> Unit,
     val trackType: TrackType,
+    private val onPlusClick: (Long) -> Unit,
 ) {
+    private var plusButtonView: View? = null
     private val viewMap = LinkedHashMap<String, View>()
     private val metadataMap = HashMap<String, ClipViewMetadata>()
     private val clipCache = HashMap<String, Clip>()
@@ -45,7 +47,7 @@ class TimelineLaneController(
      * Updates the viewport dimensions to enable thumbnail virtualization.
      * Call this from the fragment's scroll listener.
      */
-    fun updateViewport(scrollX: Int, width: Int) {
+    fun updateViewport(scrollX: Int, width: Int, isScrollingFast: Boolean = false) {
         if (viewportScrollX == scrollX && viewportWidth == width) return
         viewportScrollX = scrollX
         viewportWidth = width
@@ -54,7 +56,7 @@ class TimelineLaneController(
         viewMap.forEach { (id, view) ->
             val clip = clipCache[id] ?: return@forEach
             val asset = getAsset(clip.assetId)
-            updateThumbnailStrip(view, clip, asset, getPixelsPerMs())
+            updateThumbnailStrip(view, clip, asset, getPixelsPerMs(), isScrollingFast)
         }
     }
 
@@ -82,6 +84,41 @@ class TimelineLaneController(
                 applyTrackStyle(view)
             }
             updateView(view, clip, selectedClipIds)
+        }
+
+        // 3. Render or update the Plus button at the end of the track (VIDEO only)
+        if (trackType == TrackType.VIDEO) {
+            val lastClip = clips.maxByOrNull { it.timelinePositionMs + it.durationOnTimelineMs }
+            val plusPosMs = lastClip?.let { it.timelinePositionMs + it.durationOnTimelineMs } ?: 0L
+            val pixelsPerMs = getPixelsPerMs()
+            val plusMarginStart = (plusPosMs * pixelsPerMs).toInt() + (8 * lane.context.resources.displayMetrics.density).toInt()
+            
+            var plusView = plusButtonView
+            if (plusView == null) {
+                plusView = inflater.inflate(R.layout.item_timeline_plus_button, lane, false)
+                lane.addView(plusView)
+                plusButtonView = plusView
+                plusView.setOnClickListener {
+                    val currentClips = track?.clips ?: emptyList()
+                    val currentLastClip = currentClips.maxByOrNull { it.timelinePositionMs + it.durationOnTimelineMs }
+                    val currentPlusPosMs = currentLastClip?.let { it.timelinePositionMs + it.durationOnTimelineMs } ?: 0L
+                    onPlusClick(currentPlusPosMs)
+                }
+            }
+            
+            val params = ConstraintLayout.LayoutParams(
+                (40 * lane.context.resources.displayMetrics.density).toInt(),
+                (40 * lane.context.resources.displayMetrics.density).toInt()
+            ).apply {
+                startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+                bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+                marginStart = plusMarginStart
+            }
+            plusView.layoutParams = params
+            plusView.visibility = View.VISIBLE
+        } else {
+            plusButtonView?.visibility = View.GONE
         }
     }
 
@@ -138,13 +175,15 @@ class TimelineLaneController(
             durationOnTimelineMs = clip.durationOnTimelineMs,
             isSelected = isSelected,
             assetUri = asset?.mediaUri,
+            pixelsPerMs = pixelsPerMs,
         )
         val current = metadataMap[clip.id]
 
         val needsLayout = current == null ||
                 current.timelinePositionMs != newMeta.timelinePositionMs ||
                 current.durationOnTimelineMs != newMeta.durationOnTimelineMs ||
-                current.isSelected != newMeta.isSelected
+                current.isSelected != newMeta.isSelected ||
+                current.pixelsPerMs != newMeta.pixelsPerMs
 
         val needsThumbnails = current == null ||
                 current.clipId != newMeta.clipId ||
@@ -202,14 +241,14 @@ class TimelineLaneController(
             } else if (trackType == TrackType.ADJUSTMENT) {
                 nameView.text = "Color Grading"
                 nameView.visibility = View.VISIBLE
+            } else if (asset != null) {
+                nameView.text = asset.displayName.substringBeforeLast(".")
+                nameView.visibility = View.VISIBLE
             } else if (trackType == TrackType.AUDIO) {
                 nameView.text = "Adventure.mp3"
                 nameView.visibility = View.VISIBLE
             } else if (trackType == TrackType.OVERLAY) {
                 nameView.text = "Mountains.png"
-                nameView.visibility = View.VISIBLE
-            } else if (asset != null) {
-                nameView.text = asset.displayName.substringBeforeLast(".")
                 nameView.visibility = View.VISIBLE
             } else {
                 nameView.text = "Missing Asset"
@@ -262,7 +301,7 @@ class TimelineLaneController(
      * clips, or a synthesized waveform for AUDIO clips. TEXT clips show a text preview.
      * Recycles ImageViews and virtualizes off-screen tiles to prevent jank.
      */
-    private fun updateThumbnailStrip(view: View, clip: Clip, asset: Asset?, pixelsPerMs: Float) {
+    private fun updateThumbnailStrip(view: View, clip: Clip, asset: Asset?, pixelsPerMs: Float, isScrollingFast: Boolean = false) {
         val stripContainer = view.findViewById<LinearLayout>(R.id.thumbnailStripContainer)
         val waveformView = view.findViewById<View>(R.id.waveformView)
 
@@ -299,9 +338,9 @@ class TimelineLaneController(
             return
         }
 
+        val density = lane.context.resources.displayMetrics.density
+        val tileWidthPx = (48 * density).toInt() // visual filmstrip tiles in dp
         val clipWidthPx = (clip.durationOnTimelineMs * pixelsPerMs).toInt()
-        // Denser tiles (~32dp) so the strip reads like a filmstrip.
-        val tileWidthPx = 32
         val tileCount = max(1, ceil(clipWidthPx.toDouble() / tileWidthPx).toInt())
         val timeStepMs = if (tileCount > 1) clip.durationOnTimelineMs / tileCount else 0L
 
@@ -310,6 +349,8 @@ class TimelineLaneController(
         if (currentChildCount > tileCount) {
             stripContainer.removeViews(tileCount, currentChildCount - tileCount)
         }
+
+        val timelinePadding = viewportWidth / 2
 
         for (i in 0 until tileCount) {
             val imageView = if (i < stripContainer.childCount) {
@@ -322,23 +363,42 @@ class TimelineLaneController(
                 }
             }
 
-            // virtualization check: only load if tile is roughly visible
+            // virtualization check: only load if tile is roughly visible in scrollview coordinates
             val tileStartPx = (clip.timelinePositionMs * pixelsPerMs).toInt() + (i * tileWidthPx)
-            val isVisible = viewportWidth == 0 || (tileStartPx + tileWidthPx >= viewportScrollX - tileWidthPx && 
-                            tileStartPx <= viewportScrollX + viewportWidth + tileWidthPx)
+            val tileStartInScroll = timelinePadding + tileStartPx
+            val isVisible = viewportWidth == 0 || (tileStartInScroll + tileWidthPx >= viewportScrollX - tileWidthPx && 
+                            tileStartInScroll <= viewportScrollX + viewportWidth + tileWidthPx)
 
             if (isVisible) {
                 // Calculate frame time considering speed factor and trim
                 val frameOffsetMs = (i * timeStepMs * clip.speedFactor).toLong()
                 val frameTimeMs = clip.trimStartMs + frameOffsetMs
                 
-                imageView.load(android.net.Uri.parse(asset.mediaUri)) {
-                    videoFrameMillis(frameTimeMs)
-                    crossfade(true)
-                    placeholder(R.color.color_surface_variant)
-                    error(R.color.color_error)
-                    // Optimization: don't reload if it's the same URI and time
-                    data(asset.mediaUri)
+                val cachedBitmap = ThumbnailCache.get(asset.mediaUri, frameTimeMs)
+                if (cachedBitmap != null) {
+                    imageView.setImageBitmap(cachedBitmap)
+                } else if (!isScrollingFast) {
+                    imageView.load(android.net.Uri.parse(asset.mediaUri)) {
+                        videoFrameMillis(frameTimeMs)
+                        bitmapConfig(android.graphics.Bitmap.Config.ARGB_8888)
+                        crossfade(true)
+                        placeholder(R.color.color_surface_variant)
+                        error(R.color.color_error)
+                        listener(
+                            onSuccess = { _, result ->
+                                if (result.drawable is android.graphics.drawable.BitmapDrawable) {
+                                    ThumbnailCache.put(
+                                        asset.mediaUri,
+                                        frameTimeMs,
+                                        (result.drawable as android.graphics.drawable.BitmapDrawable).bitmap
+                                    )
+                                }
+                            }
+                        )
+                    }
+                } else {
+                    imageView.setImageDrawable(null)
+                    imageView.setImageResource(R.color.color_surface_variant)
                 }
             } else {
                 // Clear any pending image load by setting drawable to null
@@ -374,6 +434,22 @@ class TimelineLaneController(
         viewMap.values.forEach { lane.removeView(it) }
         viewMap.clear()
         metadataMap.clear()
+    }
+}
+
+/**
+ * Global LRU Cache for decoded video frames.
+ * Key format: "assetUri:frameTimeMs"
+ */
+object ThumbnailCache {
+    private val cache = android.util.LruCache<String, android.graphics.Bitmap>(200)
+
+    fun get(assetUri: String, frameTimeMs: Long): android.graphics.Bitmap? {
+        return cache.get("$assetUri:$frameTimeMs")
+    }
+
+    fun put(assetUri: String, frameTimeMs: Long, bitmap: android.graphics.Bitmap) {
+        cache.put("$assetUri:$frameTimeMs", bitmap)
     }
 }
 

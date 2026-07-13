@@ -20,9 +20,9 @@ interface TimelineEngine {
 
     /**
      * Appends or inserts a [Clip] onto a [Track] within the given [Timeline].
-     * Returns a new [Timeline] with the clip added.
+     * Returns a new [Timeline] with the clip added, or null if an overlap is detected.
      */
-    fun addClip(timeline: Timeline, trackId: String, clip: Clip): Timeline
+    fun addClip(timeline: Timeline, trackId: String, clip: Clip): Timeline?
 
     /**
      * Removes the clip with the given [clipId] from the timeline.
@@ -44,15 +44,15 @@ interface TimelineEngine {
 
     /**
      * Moves a clip to a new position on the timeline.
-     * Returns a new [Timeline] with the clip repositioned.
+     * Returns a new [Timeline] with the clip repositioned, or null if an overlap is detected.
      */
-    fun moveClip(timeline: Timeline, clipId: String, newPositionMs: Long): Timeline
+    fun moveClip(timeline: Timeline, clipId: String, newPositionMs: Long): Timeline?
 
     /**
      * Moves a set of clips by the same [deltaMs] offset, preserving their relative spacing.
-     * Returns a new [Timeline] with all moved clips repositioned.
+     * Returns a new [Timeline] with all moved clips repositioned, or null if an overlap is detected.
      */
-    fun moveClips(timeline: Timeline, clipIds: Set<String>, deltaMs: Long): Timeline
+    fun moveClips(timeline: Timeline, clipIds: Set<String>, deltaMs: Long): Timeline?
 
     /**
      * Returns the computed total duration of the given timeline in milliseconds.

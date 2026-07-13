@@ -1,6 +1,7 @@
 package com.beatsandbeyond.video_editor.core.data.engine
 
 import android.content.Context
+import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import com.beatsandbeyond.video_editor.core.common.AppResult
@@ -68,30 +69,161 @@ class AndroidAudioEngine @Inject constructor(
     }
 
     override suspend fun extractWaveform(asset: Asset, samplesPerSecond: Int): AppResult<FloatArray> = withContext(dispatchers.io) {
-        // Phase 4 waveform extraction.
-        // A production app would decode PCM via MediaCodec and downsample. Here we synthesize a
-        // deterministic, natural-looking waveform seeded by the asset id so it is stable across
-        // re-extractions (no flicker) and bounded to [0.1, 0.9].
+        val durationSec = (asset.durationMs / 1000).toInt().coerceAtLeast(1)
+        val totalSamples = (durationSec * samplesPerSecond).coerceAtLeast(1)
+        val bucketDurationUs = 1_000_000L / samplesPerSecond
+
+        val bucketSumSq = FloatArray(totalSamples)
+        val bucketCount = IntArray(totalSamples)
+
+        val extractor = MediaExtractor()
+        var decoder: MediaCodec? = null
+
         try {
-            val durationSec = (asset.durationMs / 1000).toInt().coerceAtLeast(1)
-            val totalSamples = (durationSec * samplesPerSecond).coerceAtLeast(1)
-            val random = java.util.Random(asset.id.hashCode().toLong())
-
-            val waveform = FloatArray(totalSamples)
-            var currentAmplitude = 0.5f
-
-            for (i in 0 until totalSamples) {
-                // Brownian walk for a natural-looking envelope, with a slow sine swell.
-                currentAmplitude += (random.nextFloat() - 0.5f) * 0.2f
-                val swell = 0.15f * kotlin.math.sin(i.toDouble() / totalSamples * Math.PI * 4).toFloat()
-                currentAmplitude = (currentAmplitude + swell).coerceIn(0.1f, 0.9f)
-                waveform[i] = currentAmplitude
+            extractor.setDataSource(context, android.net.Uri.parse(asset.mediaUri), null)
+            val audioTrackIndex = findAudioTrack(extractor)
+            if (audioTrackIndex < 0) {
+                return@withContext AppResult.Error(Exception("No audio track found in asset: ${asset.id}"))
             }
 
-            AppResult.Success(waveform)
+            extractor.selectTrack(audioTrackIndex)
+            val format = extractor.getTrackFormat(audioTrackIndex)
+            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(1)
+            val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: throw IllegalStateException("MIME type missing")
+            decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(format, null, null, 0)
+            decoder.start()
+
+            val bufferInfo = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+            val TIMEOUT_US = 5000L
+
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inputBufferIndex = decoder.dequeueInputBuffer(TIMEOUT_US)
+                    if (inputBufferIndex >= 0) {
+                        val inBuf = decoder.getInputBuffer(inputBufferIndex)
+                        if (inBuf != null) {
+                            val sampleSize = extractor.readSampleData(inBuf, 0)
+                            if (sampleSize < 0) {
+                                decoder.queueInputBuffer(
+                                    inputBufferIndex,
+                                    0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                                )
+                                inputDone = true
+                            } else {
+                                decoder.queueInputBuffer(
+                                    inputBufferIndex,
+                                    0, sampleSize, extractor.sampleTime, 0
+                                )
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                var outputAvailable = true
+                while (outputAvailable && !outputDone) {
+                    val outBufIndex = decoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
+                    when {
+                        outBufIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> outputAvailable = false
+                        outBufIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> { /* ignore */ }
+                        outBufIndex >= 0 -> {
+                            if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                                outputDone = true
+                            }
+
+                            if (bufferInfo.size > 0) {
+                                val byteBuffer = decoder.getOutputBuffer(outBufIndex)
+                                if (byteBuffer != null) {
+                                    byteBuffer.position(bufferInfo.offset)
+                                    byteBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                                    
+                                    val shortBuffer = byteBuffer.asShortBuffer()
+                                    val sampleCountInBuf = shortBuffer.remaining()
+                                    val startPtsUs = bufferInfo.presentationTimeUs
+
+                                    for (j in 0 until sampleCountInBuf) {
+                                        val sample = shortBuffer.get()
+                                        val normSample = sample.toFloat() / 32768.0f
+
+                                        val sampleTimeUs = startPtsUs + (j * 1_000_000L) / (sampleRate * channelCount)
+                                        val bucketIndex = (sampleTimeUs / bucketDurationUs).toInt()
+
+                                        if (bucketIndex in 0 until totalSamples) {
+                                            bucketSumSq[bucketIndex] += normSample * normSample
+                                            bucketCount[bucketIndex]++
+                                        }
+                                    }
+                                }
+                            }
+                            decoder.releaseOutputBuffer(outBufIndex, false)
+                        }
+                    }
+                }
+            }
+
+            val rmsArray = FloatArray(totalSamples)
+            var maxRms = 0f
+            for (i in 0 until totalSamples) {
+                val count = bucketCount[i]
+                if (count > 0) {
+                    val rms = kotlin.math.sqrt(bucketSumSq[i] / count)
+                    rmsArray[i] = rms
+                    if (rms > maxRms) {
+                        maxRms = rms
+                    }
+                } else {
+                    rmsArray[i] = 0f
+                }
+            }
+
+            val finalWaveform = FloatArray(totalSamples)
+            if (maxRms > 0f) {
+                for (i in 0 until totalSamples) {
+                    finalWaveform[i] = (rmsArray[i] / maxRms).coerceIn(0f, 1f)
+                }
+            } else {
+                for (i in 0 until totalSamples) {
+                    finalWaveform[i] = 0.05f
+                }
+            }
+
+            AppResult.Success(finalWaveform)
+
         } catch (e: Exception) {
             Logger.e(TAG, "Failed to extract waveform: ${asset.id}", e)
-            AppResult.Error(e)
+            var hasSomeData = false
+            val finalWaveform = FloatArray(totalSamples)
+            val rmsArray = FloatArray(totalSamples)
+            var maxRms = 0f
+            for (i in 0 until totalSamples) {
+                val count = bucketCount[i]
+                if (count > 0) {
+                    hasSomeData = true
+                    val rms = kotlin.math.sqrt(bucketSumSq[i] / count)
+                    rmsArray[i] = rms
+                    if (rms > maxRms) {
+                        maxRms = rms
+                    }
+                }
+            }
+
+            if (hasSomeData && maxRms > 0f) {
+                for (i in 0 until totalSamples) {
+                    finalWaveform[i] = (rmsArray[i] / maxRms).coerceIn(0f, 1f)
+                }
+                AppResult.Success(finalWaveform)
+            } else {
+                AppResult.Error(e)
+            }
+        } finally {
+            decoder?.stop()
+            decoder?.release()
+            extractor.release()
         }
     }
 
