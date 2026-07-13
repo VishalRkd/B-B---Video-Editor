@@ -180,6 +180,17 @@ class ProjectDetailViewModel @Inject constructor(
         }
     }
 
+    // ── Live read accessors (used by gestures for direct, jank-free manipulation) ──
+
+    /** Returns the current clip from the live project model (not a snapshot). */
+    fun getClip(clipId: String): Clip? = currentProject?.timeline?.findClip(clipId)
+
+    /** Returns the source asset duration for a clip (used to clamp trims). */
+    fun getAssetDurationMs(clipId: String): Long {
+        val clip = getClip(clipId) ?: return 0L
+        return assetsMap[clip.assetId]?.durationMs ?: 0L
+    }
+
     // ── Edit operations ─────────────────────────────────────────────────────
 
     fun trimSelectedClip(
@@ -221,9 +232,12 @@ class ProjectDetailViewModel @Inject constructor(
                     }
                 } else {
                     currentProject = result.data
-                    refreshContent(result.data, content.selectedClipId)
-                    
-                    // Seek ExoPlayer to the active trim frame relative to the currently loaded clipping config
+                    // IMPORTANT: do NOT call refreshContent() here. Emitting a new StateFlow mid-gesture
+                    // triggers renderTracks() -> rebindSelectedClipGestures(), which replaces the trim
+                    // OnTouchListener while the finger is still down. The new listener's captured
+                    // start values reset to 0, making coerceIn(0, 0-500) throw and crash the app.
+                    // The Fragment already moves/resizes the view directly via the lane controller,
+                    // so we only sync the model + seek the preview here.
                     val isTrimmingLeft = newTrimStartMs != originalClip.trimStartMs
                     val targetSourceMs = if (isTrimmingLeft) newTrimStartMs else newTrimEndMs
                     val localOffsetMs = targetSourceMs - originalClip.trimStartMs
@@ -293,7 +307,10 @@ class ProjectDetailViewModel @Inject constructor(
                     applyEdit(result.data)
                 } else {
                     currentProject = result.data
-                    refreshContent(result.data, content.selectedClipId)
+                    // Do NOT refreshContent() mid-drag: it would emit StateFlow and trigger
+                    // renderTracks() -> rebindSelectedClipGestures(), replacing the move
+                    // OnTouchListener while the finger is still down (causes jank/crash).
+                    // The Fragment moves the view directly via the lane controller.
                 }
             }
             is AppResult.Error -> {
@@ -339,7 +356,7 @@ class ProjectDetailViewModel @Inject constructor(
                     applyEdit(result.data)
                 } else {
                     currentProject = result.data
-                    refreshContent(result.data, content.selectedClipId)
+                    // Do NOT refreshContent() mid-drag (see moveSelectedClip for rationale).
                 }
             }
             is AppResult.Error -> {

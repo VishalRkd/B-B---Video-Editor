@@ -93,3 +93,7 @@ fun Timeline.removeClip(clipId: String): Timeline? {
     }
     return if (found) copy(tracks = updatedTracks) else null
 }
+
+/** Returns the [TrackType] that currently holds the clip with [clipId], or null. */
+fun Timeline.trackTypeOf(clipId: String): TrackType? =
+    tracks.firstOrNull { it.clips.any { c -> c.id == clipId } }?.type

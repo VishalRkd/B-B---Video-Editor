@@ -17,8 +17,10 @@ import coil.request.videoFrameMillis
 import com.beatsandbeyond.video_editor.R
 import com.beatsandbeyond.video_editor.core.domain.model.Clip
 import com.beatsandbeyond.video_editor.core.domain.model.PlaybackState
+import com.beatsandbeyond.video_editor.core.domain.model.trackTypeOf
 import com.beatsandbeyond.video_editor.databinding.FragmentProjectDetailBinding
 import com.beatsandbeyond.video_editor.feature.projectdetail.model.ProjectDetailUiState
+import com.beatsandbeyond.video_editor.feature.projectdetail.view.TimelineLaneController
 import com.beatsandbeyond.video_editor.ui.base.BaseFragment
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
@@ -41,6 +43,12 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     private var isMagnetEnabled = false
     private var isRippleEnabled = false
     private val snapThresholdMs = 150L // snap within 150ms
+
+    // Per-lane controllers (O(1) view lookup, recycling) — one per track type
+    private val laneControllers = mutableMapOf<com.beatsandbeyond.video_editor.core.domain.model.TrackType, TimelineLaneController>()
+    private var isRenderingTracks = false
+    private var lastRenderSignature: String? = null
+    private var isGestureActive = false
 
     override fun inflateBinding(
         inflater: LayoutInflater,
@@ -392,193 +400,128 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             binding.playheadView.setPlayheadTime(state.currentPositionMs)
         }
 
+        // During playback, position ticks fire ~30x/sec. Re-rendering the lanes every tick is
+        // the main source of jank, so we only re-render when the project/selection/zoom actually
+        // changed (guarded by renderTracks' internal signature check).
+        renderTracksIfChanged(state)
+    }
+
+    /**
+     * Re-renders the lanes only when something structural changed (project, selection, zoom),
+     * not on every playback position tick.
+     */
+    private fun renderTracksIfChanged(state: ProjectDetailUiState.Content) {
+        val signature = "${state.project.updatedAt}:${state.selectedClipId}:${state.selectedClipIds.joinToString()}:$pixelsPerMs"
+        if (signature == lastRenderSignature) return
+        lastRenderSignature = signature
         renderTracks(state)
     }
 
     private fun renderTracks(state: ProjectDetailUiState.Content) {
-        // Update ruler configurations
-        binding.timelineRuler.setDurationMs(state.totalDurationMs)
-        binding.timelineRuler.setPixelsPerMs(pixelsPerMs)
-        binding.timelineRuler.setViewportWidth(binding.timelineHorizontalScroll.width)
+        if (isRenderingTracks) return
+        isRenderingTracks = true
+        try {
+            // Update ruler configurations
+            binding.timelineRuler.setDurationMs(state.totalDurationMs)
+            binding.timelineRuler.setPixelsPerMs(pixelsPerMs)
+            binding.timelineRuler.setViewportWidth(binding.timelineHorizontalScroll.width)
 
-        // Clear other lanes (audio, text, overlay remain empty in Phase 3)
-        binding.audioTrackLane.removeAllViews()
-        binding.textTrackLane.removeAllViews()
-        binding.overlayTrackLane.removeAllViews()
-
-        // Empty timeline background sizing
-        val totalTimelineWidth = (state.totalDurationMs * pixelsPerMs).toInt()
-        binding.tracksContainer.layoutParams = binding.tracksContainer.layoutParams.apply {
-            width = totalTimelineWidth
-        }
-
-        // Render video clips with recycling
-        val videoTrack = state.project.timeline.primaryVideoTrack
-        val clips = videoTrack?.clips ?: emptyList()
-        val clipIds = clips.map { it.id }.toSet()
-
-        // 1. Remove old/deleted clip views
-        val viewsToRemove = mutableListOf<View>()
-        for (i in 0 until binding.videoTrackLane.childCount) {
-            val child = binding.videoTrackLane.getChildAt(i)
-            val tagId = (child.tag as? ClipViewMetadata)?.clipId
-            if (tagId == null || tagId !in clipIds) {
-                viewsToRemove.add(child)
-            }
-        }
-        viewsToRemove.forEach { binding.videoTrackLane.removeView(it) }
-
-        // 2. Add or update clip views
-        clips.forEach { clip ->
-            var clipView = (0 until binding.videoTrackLane.childCount)
-                .map { binding.videoTrackLane.getChildAt(it) }
-                .firstOrNull { (it.tag as? ClipViewMetadata)?.clipId == clip.id }
-
-            if (clipView == null) {
-                clipView = layoutInflater.inflate(R.layout.item_timeline_clip_editable, binding.videoTrackLane, false)
-                binding.videoTrackLane.addView(clipView)
+            // Empty timeline background sizing
+            val totalTimelineWidth = (state.totalDurationMs * pixelsPerMs).toInt()
+            binding.tracksContainer.layoutParams = binding.tracksContainer.layoutParams.apply {
+                width = totalTimelineWidth
             }
 
-            val asset = state.assets[clip.assetId]
-            val isSelected = clip.id == state.selectedClipId
-            val newMetadata = ClipViewMetadata(
-                clipId = clip.id,
-                timelinePositionMs = clip.timelinePositionMs,
-                trimStartMs = clip.trimStartMs,
-                trimEndMs = clip.trimEndMs,
-                durationOnTimelineMs = clip.durationOnTimelineMs,
-                isSelected = isSelected,
-                assetUri = asset?.mediaUri
-            )
-
-            val currentMetadata = clipView.tag as? ClipViewMetadata
-            val needsLayoutUpdate = currentMetadata == null ||
-                    currentMetadata.clipId != newMetadata.clipId ||
-                    currentMetadata.timelinePositionMs != newMetadata.timelinePositionMs ||
-                    currentMetadata.durationOnTimelineMs != newMetadata.durationOnTimelineMs ||
-                    currentMetadata.isSelected != newMetadata.isSelected
-
-            val needsThumbnailsUpdate = currentMetadata == null ||
-                    currentMetadata.clipId != newMetadata.clipId ||
-                    currentMetadata.trimStartMs != newMetadata.trimStartMs ||
-                    currentMetadata.trimEndMs != newMetadata.trimEndMs ||
-                    currentMetadata.durationOnTimelineMs != newMetadata.durationOnTimelineMs ||
-                    currentMetadata.assetUri != newMetadata.assetUri
-
-            // Setup layout params
-            if (needsLayoutUpdate) {
-                val params = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams(
-                    (clip.durationOnTimelineMs * pixelsPerMs).toInt(),
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                ).apply {
-                    startToStart = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                    topToTop = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                    bottomToBottom = androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.PARENT_ID
-                    marginStart = (clip.timelinePositionMs * pixelsPerMs).toInt()
-                }
-                clipView.layoutParams = params
-            }
-
-            val stripContainer = clipView.findViewById<android.widget.LinearLayout>(R.id.thumbnailStripContainer)
-            val nameView = clipView.findViewById<TextView>(R.id.clipName)
-            val durationView = clipView.findViewById<TextView>(R.id.clipDurationText)
-            val borderView = clipView.findViewById<View>(R.id.activeBorder)
-            val leftHandle = clipView.findViewById<View>(R.id.leftTrimHandle)
-            val rightHandle = clipView.findViewById<View>(R.id.rightTrimHandle)
-
-            // Load thumbnails if needed
-            if (needsThumbnailsUpdate) {
-                if (asset != null) {
-                    val clipWidthPx = (clip.durationOnTimelineMs * pixelsPerMs).toInt()
-                    val tileWidthPx = resources.getDimensionPixelSize(R.dimen.timeline_track_height)
-                    val tileCount = Math.max(1, Math.ceil(clipWidthPx.toDouble() / tileWidthPx).toInt())
-                    val timeStepMs = clip.durationOnTimelineMs / tileCount
-                    
-                    stripContainer.removeAllViews()
-                    for (i in 0 until tileCount) {
-                        val imageView = ImageView(context).apply {
-                            layoutParams = android.widget.LinearLayout.LayoutParams(tileWidthPx, ViewGroup.LayoutParams.MATCH_PARENT)
-                            scaleType = ImageView.ScaleType.CENTER_CROP
-                        }
-                        val frameTimeMs = clip.trimStartMs + (i * timeStepMs)
-                        imageView.load(android.net.Uri.parse(asset.mediaUri)) {
-                            videoFrameMillis(frameTimeMs)
-                            crossfade(true)
-                            placeholder(R.color.color_surface_variant)
-                        }
-                        stripContainer.addView(imageView)
+            // Render every track lane through its controller (video/audio/text/overlay)
+            state.project.timeline.tracks.forEach { track ->
+                val controller = laneControllers.getOrPut(track.type) {
+                    val lane = when (track.type) {
+                        com.beatsandbeyond.video_editor.core.domain.model.TrackType.VIDEO -> binding.videoTrackLane
+                        com.beatsandbeyond.video_editor.core.domain.model.TrackType.AUDIO -> binding.audioTrackLane
+                        com.beatsandbeyond.video_editor.core.domain.model.TrackType.TEXT -> binding.textTrackLane
+                        com.beatsandbeyond.video_editor.core.domain.model.TrackType.OVERLAY -> binding.overlayTrackLane
                     }
-                    nameView.text = asset.displayName.substringBeforeLast(".")
-                } else {
-                    nameView.text = "Unknown Clip"
+                    TimelineLaneController(
+                        lane = lane,
+                        inflater = layoutInflater,
+                        getPixelsPerMs = { pixelsPerMs },
+                        getAsset = { id -> state.assets[id] },
+                        onClipClick = { clipId -> viewModel.selectClip(clipId) },
+                        onClipLongClick = { clipId -> viewModel.toggleClipSelection(clipId) },
+                        trackType = track.type,
+                    )
                 }
-                durationView.text = "%.1fs".format(clip.durationOnTimelineMs / 1000f)
+                controller.render(track, state.selectedClipIds)
             }
 
-            // Bind click and touch gestures — only rebind on identity/selection change,
-            // NOT on every trim/move update (which would reset the gesture mid-drag)
-            val needsGestureRebind = currentMetadata == null ||
-                    currentMetadata.clipId != newMetadata.clipId ||
-                    currentMetadata.isSelected != newMetadata.isSelected
+            // Rebind gestures for the selected clip only (selection changed → rebind)
+            rebindSelectedClipGestures(state)
 
-            if (needsGestureRebind) {
-                val isInGroup = state.selectedClipIds.contains(clip.id)
-                borderView.visibility = if (isInGroup) View.VISIBLE else View.GONE
-                leftHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
-                rightHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
-
-                if (!isSelected) {
-                    clipView.setOnClickListener {
-                        // Tap selects; tap again with magnet-like multi-select via long press
-                        viewModel.selectClip(clip.id)
-                    }
-                    clipView.setOnLongClickListener {
-                        viewModel.toggleClipSelection(clip.id)
-                        true
-                    }
-                    clipView.setOnTouchListener(null)
-                    leftHandle.setOnTouchListener(null)
-                    rightHandle.setOnTouchListener(null)
-                } else {
-                    clipView.setOnClickListener(null)
-                    clipView.setOnLongClickListener(null)
-                    setupTrimHandles(leftHandle, rightHandle, clip, asset?.durationMs ?: 0L)
-                    setupMoveGesture(clipView, clip)
-                }
-            }
-
-            clipView.tag = newMetadata
+            // Context Toolbar toggle
+            binding.contextToolbar.root.visibility = if (state.selectedClipId != null) View.VISIBLE else View.GONE
+        } finally {
+            isRenderingTracks = false
         }
+    }
 
-        // Context Toolbar toggle
-        binding.contextToolbar.root.visibility = if (state.selectedClipId != null) View.VISIBLE else View.GONE
+    /**
+     * Rebinds move/trim gestures to the currently selected clip's view. Called only when
+     * selection changes (not on every frame), so in-progress gestures are never interrupted.
+     */
+    private fun rebindSelectedClipGestures(state: ProjectDetailUiState.Content) {
+        // Never rebind while a gesture is active — replacing the OnTouchListener mid-drag
+        // resets its captured start values and causes crashes/jank.
+        if (isGestureActive) return
+        val selectedId = state.selectedClipId ?: return
+        val clip = viewModel.getClip(selectedId) ?: return
+        val trackType = state.project.timeline.trackTypeOf(selectedId) ?: return
+        val controller = laneControllers[trackType] ?: return
+        val clipView = controller.getView(selectedId) ?: return
+        val leftHandle = clipView.findViewById<View>(R.id.leftTrimHandle)
+        val rightHandle = clipView.findViewById<View>(R.id.rightTrimHandle)
+        val assetDuration = viewModel.getAssetDurationMs(selectedId)
+        setupTrimHandles(leftHandle, rightHandle, clip, assetDuration)
+        setupMoveGesture(clipView, clip)
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupTrimHandles(leftHandle: View, rightHandle: View, clip: Clip, assetDurationMs: Long) {
+        // Read live clip data at gesture start so bounds never go stale mid-drag.
         var startTouchX = 0f
-        var startTrimVal = 0L
+        var startTrimStart = 0L
+        var startTrimEnd = 0L
 
         leftHandle.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    val live = viewModel.getClip(clip.id)
                     startTouchX = event.rawX
-                    startTrimVal = clip.trimStartMs
+                    startTrimStart = live?.trimStartMs ?: clip.trimStartMs
+                    startTrimEnd = live?.trimEndMs ?: clip.trimEndMs
+                    isGestureActive = true
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
-                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
-                    val newTrimStart = (startTrimVal + deltaMs).coerceIn(0L, clip.trimEndMs - 500L)
-                    viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = false, ripple = isRippleEnabled)
+                    val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
+                    val newTrimStart = (startTrimStart + deltaMs).coerceIn(0L, startTrimEnd - 500L)
+                    // Direct view manipulation — no StateFlow round-trip, no thumbnail reload.
+                    laneControllers[stateTrackType(clip.id)]?.setClipBounds(
+                        clip.id, live.timelinePositionMs, newTrimStart - live.trimStartMs + live.durationOnTimelineMs
+                    )
+                    // Lightweight commit for preview seek only (no full re-render).
+                    viewModel.trimSelectedClip(newTrimStart, startTrimEnd, isFinal = false, ripple = isRippleEnabled)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
-                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
-                    val newTrimStart = (startTrimVal + deltaMs).coerceIn(0L, clip.trimEndMs - 500L)
-                    viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = true, ripple = isRippleEnabled)
+                    val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
+                    val newTrimStart = (startTrimStart + deltaMs).coerceIn(0L, startTrimEnd - 500L)
+                    viewModel.trimSelectedClip(newTrimStart, startTrimEnd, isFinal = true, ripple = isRippleEnabled)
+                    isGestureActive = false
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
@@ -589,23 +532,32 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         rightHandle.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    val live = viewModel.getClip(clip.id)
                     startTouchX = event.rawX
-                    startTrimVal = clip.trimEndMs
+                    startTrimStart = live?.trimStartMs ?: clip.trimStartMs
+                    startTrimEnd = live?.trimEndMs ?: clip.trimEndMs
+                    isGestureActive = true
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
-                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
-                    val newTrimEnd = (startTrimVal + deltaMs).coerceIn(clip.trimStartMs + 500L, assetDurationMs)
-                    viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = false, ripple = isRippleEnabled)
+                    val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
+                    val newTrimEnd = (startTrimEnd + deltaMs).coerceIn(startTrimStart + 500L, assetDurationMs)
+                    laneControllers[stateTrackType(clip.id)]?.setClipBounds(
+                        clip.id, live.timelinePositionMs, newTrimEnd - live.trimStartMs
+                    )
+                    viewModel.trimSelectedClip(startTrimStart, newTrimEnd, isFinal = false, ripple = isRippleEnabled)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val live = viewModel.getClip(clip.id) ?: return@setOnTouchListener true
                     val dx = event.rawX - startTouchX
-                    val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
-                    val newTrimEnd = (startTrimVal + deltaMs).coerceIn(clip.trimStartMs + 500L, assetDurationMs)
-                    viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = true, ripple = isRippleEnabled)
+                    val deltaMs = ((dx / pixelsPerMs) * live.speedFactor).toLong()
+                    val newTrimEnd = (startTrimEnd + deltaMs).coerceIn(startTrimStart + 500L, assetDurationMs)
+                    viewModel.trimSelectedClip(startTrimStart, newTrimEnd, isFinal = true, ripple = isRippleEnabled)
+                    isGestureActive = false
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
@@ -625,10 +577,12 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         clipView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    val live = viewModel.getClip(clip.id)
                     startTouchX = event.rawX
-                    startPositionVal = clip.timelinePositionMs
+                    startPositionVal = live?.timelinePositionMs ?: clip.timelinePositionMs
                     lastDeltaMs = 0L
                     isDragging = false
+                    isGestureActive = true
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     true
                 }
@@ -639,7 +593,6 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     }
                     if (isDragging) {
                         val rawDeltaMs = (dx / pixelsPerMs).toLong()
-                        // Snap the absolute target position when magnet is on
                         val snappedTarget = snapPosition(
                             (startPositionVal + rawDeltaMs).coerceAtLeast(0L),
                             clip.id
@@ -647,6 +600,16 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         val snappedDelta = snappedTarget - startPositionVal
                         val appliedDelta = snappedDelta - lastDeltaMs
                         if (appliedDelta != 0L) {
+                            // Direct view manipulation for ALL selected clips (group drag).
+                            val state = viewModel.uiState.value
+                            if (state is ProjectDetailUiState.Content) {
+                                state.selectedClipIds.forEach { id ->
+                                    val c = viewModel.getClip(id) ?: return@forEach
+                                    laneControllers[state.project.timeline.trackTypeOf(id)]?.setClipPosition(
+                                        id, c.timelinePositionMs + appliedDelta
+                                    )
+                                }
+                            }
                             viewModel.moveSelectedClips(appliedDelta, isFinal = false)
                             lastDeltaMs = snappedDelta
                         }
@@ -659,15 +622,23 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                             viewModel.moveSelectedClips(lastDeltaMs, isFinal = true)
                         }
                     } else if (event.action == MotionEvent.ACTION_UP) {
-                        // Small touch movement with no drag = click gesture to deselect
                         viewModel.selectClip(null)
                     }
+                    isGestureActive = false
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
                 else -> false
             }
         }
+    }
+
+    /** Resolves the current track type for a clip from the live UI state. */
+    private fun stateTrackType(clipId: String): com.beatsandbeyond.video_editor.core.domain.model.TrackType? {
+        val state = viewModel.uiState.value
+        return if (state is ProjectDetailUiState.Content) {
+            state.project.timeline.trackTypeOf(clipId)
+        } else null
     }
 
     private fun showError(message: String) {
@@ -688,6 +659,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     private fun zoomTimeline(factor: Float) {
         val newZoom = (pixelsPerMs * factor).coerceIn(minPixelsPerMs, maxPixelsPerMs)
         pixelsPerMs = newZoom
+        lastRenderSignature = null // force re-render at new zoom
         val state = viewModel.uiState.value
         if (state is ProjectDetailUiState.Content) {
             renderTracks(state)
@@ -724,17 +696,3 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         return best
     }
 }
-
-/**
- * Metadata cache stored on a timeline clip view's tag to enable performance-optimal view recycling
- * and prevent redundant film strip thumbnail loads.
- */
-data class ClipViewMetadata(
-    val clipId: String,
-    val timelinePositionMs: Long,
-    val trimStartMs: Long,
-    val trimEndMs: Long,
-    val durationOnTimelineMs: Long,
-    val isSelected: Boolean,
-    val assetUri: String?
-)
