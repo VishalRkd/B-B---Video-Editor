@@ -38,6 +38,8 @@ class ProjectDetailViewModel @Inject constructor(
     private val splitClipUseCase: SplitClipUseCase,
     private val deleteClipUseCase: DeleteClipUseCase,
     private val moveClipUseCase: MoveClipUseCase,
+    private val moveClipsUseCase: MoveClipsUseCase,
+    private val rippleTrimUseCase: RippleTrimUseCase,
     private val setSpeedUseCase: SetSpeedUseCase,
 ) : BaseViewModel() {
 
@@ -146,26 +148,63 @@ class ProjectDetailViewModel @Inject constructor(
     fun selectClip(clipId: String?) {
         _uiState.update { state ->
             if (state is ProjectDetailUiState.Content) {
-                state.copy(selectedClipId = clipId)
+                state.copy(
+                    selectedClipId = clipId,
+                    selectedClipIds = if (clipId != null) setOf(clipId) else emptySet(),
+                )
+            } else state
+        }
+    }
+
+    fun toggleClipSelection(clipId: String) {
+        _uiState.update { state ->
+            if (state is ProjectDetailUiState.Content) {
+                val newSet = if (clipId in state.selectedClipIds) {
+                    state.selectedClipIds - clipId
+                } else {
+                    state.selectedClipIds + clipId
+                }
+                state.copy(
+                    selectedClipIds = newSet,
+                    selectedClipId = newSet.lastOrNull(),
+                )
+            } else state
+        }
+    }
+
+    fun clearSelection() {
+        _uiState.update { state ->
+            if (state is ProjectDetailUiState.Content) {
+                state.copy(selectedClipId = null, selectedClipIds = emptySet())
             } else state
         }
     }
 
     // ── Edit operations ─────────────────────────────────────────────────────
 
-    fun trimSelectedClip(newTrimStartMs: Long, newTrimEndMs: Long, isFinal: Boolean) {
+    fun trimSelectedClip(
+        newTrimStartMs: Long,
+        newTrimEndMs: Long,
+        isFinal: Boolean,
+        ripple: Boolean = false,
+    ) {
         val content = currentContent ?: return
         val clipId = content.selectedClipId ?: return
         val project = currentProject ?: return
         val originalClip = project.timeline.findClip(clipId) ?: return
 
-        when (val result = trimClipUseCase(project, clipId, newTrimStartMs, newTrimEndMs)) {
+        val result = if (ripple) {
+            rippleTrimUseCase(project, clipId, newTrimStartMs, newTrimEndMs)
+        } else {
+            trimClipUseCase(project, clipId, newTrimStartMs, newTrimEndMs)
+        }
+        when (result) {
             is AppResult.Success -> {
                 if (isFinal) {
                     val updatedProject = result.data
                     val updatedClip = updatedProject.timeline.findClip(clipId)
                     val isTrimmingLeft = newTrimStartMs != originalClip.trimStartMs
-                    
+
                     val targetTimelinePos = if (isTrimmingLeft) {
                         updatedClip?.timelinePositionMs ?: 0L
                     } else {
@@ -173,6 +212,7 @@ class ProjectDetailViewModel @Inject constructor(
                     }
 
                     launchSafely {
+                        editingHistory = editingHistory.push(project, updatedProject)
                         updateProjectUseCase(updatedProject) // auto-save to Room
                         currentProject = updatedProject
                         refreshContent(updatedProject, content.selectedClipId)
@@ -283,6 +323,34 @@ class ProjectDetailViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Moves the entire multi-selection group by [deltaMs] (relative offset).
+     * Used for group drag. [isFinal] pushes history once on release.
+     */
+    fun moveSelectedClips(deltaMs: Long, isFinal: Boolean) {
+        val content = currentContent ?: return
+        val project = currentProject ?: return
+        val clipIds = content.selectedClipIds
+        if (clipIds.isEmpty()) return
+
+        when (val result = moveClipsUseCase(project, clipIds, deltaMs)) {
+            is AppResult.Success -> {
+                if (isFinal) {
+                    applyEdit(result.data)
+                } else {
+                    currentProject = result.data
+                    refreshContent(result.data, content.selectedClipId)
+                }
+            }
+            is AppResult.Error -> {
+                // Group move failed
+            }
+            AppResult.Loading -> {
+                // Not emitted
+            }
+        }
+    }
+
     // ── Undo / Redo ─────────────────────────────────────────────────────────
 
     fun undo() {
@@ -325,6 +393,7 @@ class ProjectDetailViewModel @Inject constructor(
                     project = project,
                     totalDurationMs = project.durationMs,
                     selectedClipId = selectedClipId,
+                    selectedClipIds = if (selectedClipId != null) setOf(selectedClipId) else state.selectedClipIds,
                     canUndo = editingHistory.canUndo,
                     canRedo = editingHistory.canRedo,
                 )

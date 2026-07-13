@@ -49,6 +49,12 @@ interface TimelineEngine {
     fun moveClip(timeline: Timeline, clipId: String, newPositionMs: Long): Timeline
 
     /**
+     * Moves a set of clips by the same [deltaMs] offset, preserving their relative spacing.
+     * Returns a new [Timeline] with all moved clips repositioned.
+     */
+    fun moveClips(timeline: Timeline, clipIds: Set<String>, deltaMs: Long): Timeline
+
+    /**
      * Returns the computed total duration of the given timeline in milliseconds.
      */
     fun computeDuration(timeline: Timeline): Long

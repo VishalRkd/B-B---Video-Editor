@@ -78,6 +78,21 @@ class KotlinTimelineEngine @Inject constructor() : TimelineEngine {
         return timeline.copy(tracks = updatedTracks)
     }
 
+    override fun moveClips(timeline: Timeline, clipIds: Set<String>, deltaMs: Long): Timeline {
+        if (clipIds.isEmpty() || deltaMs == 0L) return timeline
+        val updatedTracks = timeline.tracks.map { track ->
+            val hasSelection = track.clips.any { it.id in clipIds }
+            if (!hasSelection) return@map track
+            val updatedClips = track.clips.map { clip ->
+                if (clip.id in clipIds) {
+                    clip.copy(timelinePositionMs = (clip.timelinePositionMs + deltaMs).coerceAtLeast(0L))
+                } else clip
+            }.sortedBy { it.timelinePositionMs }
+            track.copy(clips = updatedClips)
+        }
+        return timeline.copy(tracks = updatedTracks)
+    }
+
     override fun computeDuration(timeline: Timeline): Long = timeline.totalDurationMs
 
     override fun addTransition(timeline: Timeline, transition: Transition): Timeline = timeline

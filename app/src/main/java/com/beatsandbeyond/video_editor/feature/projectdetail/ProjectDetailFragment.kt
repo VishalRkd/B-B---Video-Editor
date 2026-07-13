@@ -33,9 +33,14 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
 
     private val viewModel: ProjectDetailViewModel by viewModels()
     private val args: ProjectDetailFragmentArgs by navArgs()
-    private val pixelsPerMs = 0.15f // 150 pixels per second
+    private var pixelsPerMs = 0.15f // 150 pixels per second (zoomable)
+    private val minPixelsPerMs = 0.05f
+    private val maxPixelsPerMs = 0.6f
     private var isUserScrolling = false
     private var timelinePadding = 0
+    private var isMagnetEnabled = false
+    private var isRippleEnabled = false
+    private val snapThresholdMs = 150L // snap within 150ms
 
     override fun inflateBinding(
         inflater: LayoutInflater,
@@ -250,13 +255,35 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             }
         }
         binding.btnMagnet.setOnClickListener {
-            Toast.makeText(context, "Magnetic Snap enabled", Toast.LENGTH_SHORT).show()
+            isMagnetEnabled = !isMagnetEnabled
+            binding.btnMagnet.alpha = if (isMagnetEnabled) 1.0f else 0.4f
+            binding.btnMagnet.setColorFilter(
+                if (isMagnetEnabled) resources.getColor(R.color.color_primary, null)
+                else resources.getColor(R.color.white, null)
+            )
+            Toast.makeText(
+                context,
+                if (isMagnetEnabled) "Magnetic Snap ON" else "Magnetic Snap OFF",
+                Toast.LENGTH_SHORT
+            ).show()
         }
         binding.btnKeyframe.setOnClickListener {
-            Toast.makeText(context, "Keyframe added", Toast.LENGTH_SHORT).show()
+            // Zoom in / out toggle (reuse keyframe icon as zoom control)
+            zoomTimeline(if (pixelsPerMs < maxPixelsPerMs) 1.5f else 1.0f / 1.5f)
         }
         binding.btnExpand.setOnClickListener {
-            Toast.makeText(context, "Fullscreen Timeline", Toast.LENGTH_SHORT).show()
+            // Toggle ripple trim mode
+            isRippleEnabled = !isRippleEnabled
+            binding.btnExpand.alpha = if (isRippleEnabled) 1.0f else 0.4f
+            binding.btnExpand.setColorFilter(
+                if (isRippleEnabled) resources.getColor(R.color.color_primary, null)
+                else resources.getColor(R.color.white, null)
+            )
+            Toast.makeText(
+                context,
+                if (isRippleEnabled) "Ripple Trim ON" else "Ripple Trim OFF",
+                Toast.LENGTH_SHORT
+            ).show()
         }
         binding.btnMidAdd.setOnClickListener {
             Toast.makeText(context, "Add media clip", Toast.LENGTH_SHORT).show()
@@ -416,6 +443,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             val isSelected = clip.id == state.selectedClipId
             val newMetadata = ClipViewMetadata(
                 clipId = clip.id,
+                timelinePositionMs = clip.timelinePositionMs,
                 trimStartMs = clip.trimStartMs,
                 trimEndMs = clip.trimEndMs,
                 durationOnTimelineMs = clip.durationOnTimelineMs,
@@ -426,6 +454,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             val currentMetadata = clipView.tag as? ClipViewMetadata
             val needsLayoutUpdate = currentMetadata == null ||
                     currentMetadata.clipId != newMetadata.clipId ||
+                    currentMetadata.timelinePositionMs != newMetadata.timelinePositionMs ||
                     currentMetadata.durationOnTimelineMs != newMetadata.durationOnTimelineMs ||
                     currentMetadata.isSelected != newMetadata.isSelected
 
@@ -486,21 +515,33 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                 durationView.text = "%.1fs".format(clip.durationOnTimelineMs / 1000f)
             }
 
-            // Bind click and touch gestures
-            if (needsLayoutUpdate) {
-                borderView.visibility = if (isSelected) View.VISIBLE else View.GONE
+            // Bind click and touch gestures — only rebind on identity/selection change,
+            // NOT on every trim/move update (which would reset the gesture mid-drag)
+            val needsGestureRebind = currentMetadata == null ||
+                    currentMetadata.clipId != newMetadata.clipId ||
+                    currentMetadata.isSelected != newMetadata.isSelected
+
+            if (needsGestureRebind) {
+                val isInGroup = state.selectedClipIds.contains(clip.id)
+                borderView.visibility = if (isInGroup) View.VISIBLE else View.GONE
                 leftHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
                 rightHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
 
                 if (!isSelected) {
                     clipView.setOnClickListener {
+                        // Tap selects; tap again with magnet-like multi-select via long press
                         viewModel.selectClip(clip.id)
+                    }
+                    clipView.setOnLongClickListener {
+                        viewModel.toggleClipSelection(clip.id)
+                        true
                     }
                     clipView.setOnTouchListener(null)
                     leftHandle.setOnTouchListener(null)
                     rightHandle.setOnTouchListener(null)
                 } else {
                     clipView.setOnClickListener(null)
+                    clipView.setOnLongClickListener(null)
                     setupTrimHandles(leftHandle, rightHandle, clip, asset?.durationMs ?: 0L)
                     setupMoveGesture(clipView, clip)
                 }
@@ -530,14 +571,14 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimStart = (startTrimVal + deltaMs).coerceIn(0L, clip.trimEndMs - 500L)
-                    viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = false)
+                    viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = false, ripple = isRippleEnabled)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimStart = (startTrimVal + deltaMs).coerceIn(0L, clip.trimEndMs - 500L)
-                    viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = true)
+                    viewModel.trimSelectedClip(newTrimStart, clip.trimEndMs, isFinal = true, ripple = isRippleEnabled)
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
@@ -557,14 +598,14 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimEnd = (startTrimVal + deltaMs).coerceIn(clip.trimStartMs + 500L, assetDurationMs)
-                    viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = false)
+                    viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = false, ripple = isRippleEnabled)
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     val dx = event.rawX - startTouchX
                     val deltaMs = ((dx / pixelsPerMs) * clip.speedFactor).toLong()
                     val newTrimEnd = (startTrimVal + deltaMs).coerceIn(clip.trimStartMs + 500L, assetDurationMs)
-                    viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = true)
+                    viewModel.trimSelectedClip(clip.trimStartMs, newTrimEnd, isFinal = true, ripple = isRippleEnabled)
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(false)
                     true
                 }
@@ -577,6 +618,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     private fun setupMoveGesture(clipView: View, clip: Clip) {
         var startTouchX = 0f
         var startPositionVal = 0L
+        var lastDeltaMs = 0L
         val touchSlop = ViewConfiguration.get(clipView.context).scaledTouchSlop
         var isDragging = false
 
@@ -585,6 +627,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                 MotionEvent.ACTION_DOWN -> {
                     startTouchX = event.rawX
                     startPositionVal = clip.timelinePositionMs
+                    lastDeltaMs = 0L
                     isDragging = false
                     binding.timelineHorizontalScroll.requestDisallowInterceptTouchEvent(true)
                     true
@@ -595,18 +638,26 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         isDragging = true
                     }
                     if (isDragging) {
-                        val deltaMs = (dx / pixelsPerMs).toLong()
-                        val newPosition = (startPositionVal + deltaMs).coerceAtLeast(0L)
-                        viewModel.moveSelectedClip(newPosition, isFinal = false)
+                        val rawDeltaMs = (dx / pixelsPerMs).toLong()
+                        // Snap the absolute target position when magnet is on
+                        val snappedTarget = snapPosition(
+                            (startPositionVal + rawDeltaMs).coerceAtLeast(0L),
+                            clip.id
+                        )
+                        val snappedDelta = snappedTarget - startPositionVal
+                        val appliedDelta = snappedDelta - lastDeltaMs
+                        if (appliedDelta != 0L) {
+                            viewModel.moveSelectedClips(appliedDelta, isFinal = false)
+                            lastDeltaMs = snappedDelta
+                        }
                     }
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    val dx = event.rawX - startTouchX
                     if (isDragging) {
-                        val deltaMs = (dx / pixelsPerMs).toLong()
-                        val newPosition = (startPositionVal + deltaMs).coerceAtLeast(0L)
-                        viewModel.moveSelectedClip(newPosition, isFinal = true)
+                        if (lastDeltaMs != 0L) {
+                            viewModel.moveSelectedClips(lastDeltaMs, isFinal = true)
+                        }
                     } else if (event.action == MotionEvent.ACTION_UP) {
                         // Small touch movement with no drag = click gesture to deselect
                         viewModel.selectClip(null)
@@ -633,6 +684,45 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         val secs = totalSecs % 60
         return "%02d:%02d".format(mins, secs)
     }
+
+    private fun zoomTimeline(factor: Float) {
+        val newZoom = (pixelsPerMs * factor).coerceIn(minPixelsPerMs, maxPixelsPerMs)
+        pixelsPerMs = newZoom
+        val state = viewModel.uiState.value
+        if (state is ProjectDetailUiState.Content) {
+            renderTracks(state)
+        }
+    }
+
+    /**
+     * Snaps a candidate timeline position to nearby clip edges or the playhead
+     * when magnetic snapping is enabled. Returns the (possibly) adjusted position.
+     */
+    private fun snapPosition(candidateMs: Long, excludeClipId: String?): Long {
+        if (!isMagnetEnabled) return candidateMs
+        val state = viewModel.uiState.value
+        if (state !is ProjectDetailUiState.Content) return candidateMs
+
+        val snapTargets = mutableListOf<Long>()
+        state.project.timeline.primaryVideoTrack?.clips?.forEach { clip ->
+            if (clip.id != excludeClipId) {
+                snapTargets.add(clip.timelinePositionMs)
+                snapTargets.add(clip.timelineEndMs)
+            }
+        }
+        snapTargets.add(state.currentPositionMs)
+
+        var best = candidateMs
+        var bestDist = snapThresholdMs
+        for (target in snapTargets) {
+            val dist = kotlin.math.abs(target - candidateMs)
+            if (dist < bestDist) {
+                bestDist = dist
+                best = target
+            }
+        }
+        return best
+    }
 }
 
 /**
@@ -641,6 +731,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
  */
 data class ClipViewMetadata(
     val clipId: String,
+    val timelinePositionMs: Long,
     val trimStartMs: Long,
     val trimEndMs: Long,
     val durationOnTimelineMs: Long,

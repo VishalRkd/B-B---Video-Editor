@@ -47,6 +47,11 @@ class PlayheadView @JvmOverloads constructor(
     private val bubbleRect = RectF()
     private val path = Path()
 
+    init {
+        // Enable software rendering once to support shadows (not per-frame)
+        setLayerType(LAYER_TYPE_SOFTWARE, null)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         playheadX = w / 2f
@@ -60,9 +65,6 @@ class PlayheadView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val h = height.toFloat()
-
-        // Enable software rendering locally to support shadows
-        setLayerType(LAYER_TYPE_SOFTWARE, null)
 
         val rulerHeight = resources.getDimension(R.dimen.timeline_ruler_height) // 24dp
         val bubbleWidth = resources.getDimension(R.dimen.timeline_track_label_width) * 0.7f // ~56dp

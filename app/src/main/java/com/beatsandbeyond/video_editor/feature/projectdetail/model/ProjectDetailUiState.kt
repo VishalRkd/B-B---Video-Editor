@@ -21,7 +21,8 @@ sealed class ProjectDetailUiState {
         val playbackState: PlaybackState,
         val currentPositionMs: Long,
         val totalDurationMs: Long,
-        val selectedClipId: String? = null,     // null = no selection
+        val selectedClipId: String? = null,     // primary selection (null = no selection)
+        val selectedClipIds: Set<String> = emptySet(), // all selected clips (group select)
         val canUndo: Boolean = false,
         val canRedo: Boolean = false,
     ) : ProjectDetailUiState() {
