@@ -15,6 +15,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.nio.ByteBuffer
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,6 +29,9 @@ class AndroidAudioEngine @Inject constructor(
     @ApplicationContext private val context: Context,
     private val dispatchers: CoroutineDispatchers,
 ) : AudioEngine {
+
+    private val memoryCache = android.util.LruCache<String, FloatArray>(50)
+    private val cacheDir = File(context.cacheDir, "waveforms").apply { mkdirs() }
 
     companion object {
         private const val TAG = "AndroidAudioEngine"
@@ -69,6 +73,30 @@ class AndroidAudioEngine @Inject constructor(
     }
 
     override suspend fun extractWaveform(asset: Asset, samplesPerSecond: Int): AppResult<FloatArray> = withContext(dispatchers.io) {
+        val cacheKey = "${asset.id}_$samplesPerSecond"
+        
+        // 1. Try In-Memory Cache
+        val cachedInMem = memoryCache.get(cacheKey)
+        if (cachedInMem != null) {
+            return@withContext AppResult.Success(cachedInMem)
+        }
+        
+        // 2. Try Disk Cache
+        val diskFile = File(cacheDir, "$cacheKey.bin")
+        if (diskFile.exists()) {
+            try {
+                val bytes = diskFile.readBytes()
+                val floats = FloatArray(bytes.size / 4)
+                ByteBuffer.wrap(bytes).asFloatBuffer().get(floats)
+                
+                // Populate in-memory cache
+                memoryCache.put(cacheKey, floats)
+                return@withContext AppResult.Success(floats)
+            } catch (e: Exception) {
+                Logger.w(TAG, "Failed to read disk cache for $cacheKey: ${e.message}")
+            }
+        }
+
         val durationSec = (asset.durationMs / 1000).toInt().coerceAtLeast(1)
         val totalSamples = (durationSec * samplesPerSecond).coerceAtLeast(1)
         val bucketDurationUs = 1_000_000L / samplesPerSecond
@@ -192,7 +220,7 @@ class AndroidAudioEngine @Inject constructor(
                 }
             }
 
-            AppResult.Success(finalWaveform)
+            cacheAndReturn(cacheKey, finalWaveform)
 
         } catch (e: Exception) {
             Logger.e(TAG, "Failed to extract waveform: ${asset.id}", e)
@@ -216,7 +244,7 @@ class AndroidAudioEngine @Inject constructor(
                 for (i in 0 until totalSamples) {
                     finalWaveform[i] = (rmsArray[i] / maxRms).coerceIn(0f, 1f)
                 }
-                AppResult.Success(finalWaveform)
+                cacheAndReturn(cacheKey, finalWaveform)
             } else {
                 AppResult.Error(e)
             }
@@ -225,6 +253,19 @@ class AndroidAudioEngine @Inject constructor(
             decoder?.release()
             extractor.release()
         }
+    }
+
+    private fun cacheAndReturn(cacheKey: String, finalWaveform: FloatArray): AppResult<FloatArray> {
+        memoryCache.put(cacheKey, finalWaveform)
+        val diskFile = File(cacheDir, "$cacheKey.bin")
+        try {
+            val byteBuffer = ByteBuffer.allocate(finalWaveform.size * 4)
+            byteBuffer.asFloatBuffer().put(finalWaveform)
+            diskFile.writeBytes(byteBuffer.array())
+        } catch (e: Exception) {
+            Logger.w(TAG, "Failed to save disk cache for $cacheKey: ${e.message}")
+        }
+        return AppResult.Success(finalWaveform)
     }
 
     private fun findAudioTrack(extractor: MediaExtractor): Int {

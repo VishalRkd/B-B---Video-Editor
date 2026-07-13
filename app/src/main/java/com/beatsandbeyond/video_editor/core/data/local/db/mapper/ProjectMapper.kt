@@ -83,7 +83,11 @@ object ProjectMapper {
     private fun sanitizeTimeline(timeline: Timeline): Timeline {
         val sanitizedTracks = timeline.tracks.map { track: Track ->
             val sanitizedClips = track.clips.map { clip: Clip ->
-                if (clip.filter == null) clip.copy(filter = VideoFilter.None) else clip
+                var c = if (clip.filter == null) clip.copy(filter = VideoFilter.None) else clip
+                if (c.animatableProperties == null) {
+                    c = c.copy(animatableProperties = emptyList())
+                }
+                c
             }
             track.copy(clips = sanitizedClips)
         }

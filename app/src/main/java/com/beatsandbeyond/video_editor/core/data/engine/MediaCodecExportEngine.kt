@@ -21,6 +21,7 @@ import com.beatsandbeyond.video_editor.core.domain.model.Project
 import com.beatsandbeyond.video_editor.core.domain.model.Timeline
 import com.beatsandbeyond.video_editor.core.domain.model.Track
 import com.beatsandbeyond.video_editor.core.domain.model.TrackType
+import com.beatsandbeyond.video_editor.core.domain.model.VideoFilter
 import com.beatsandbeyond.video_editor.core.domain.repository.AssetRepository
 import com.beatsandbeyond.video_editor.core.utils.CoroutineDispatchers
 import com.beatsandbeyond.video_editor.core.utils.Logger
@@ -87,24 +88,45 @@ class MediaCodecExportEngine @Inject constructor(
                 return@flow
             }
 
+            val videoTrack = project.timeline.primaryVideoTrack
+            val videoClips = videoTrack?.clips ?: emptyList()
+
             val audioTrack = project.timeline.tracks.firstOrNull { it.type == TrackType.AUDIO }
             val audioClips = audioTrack?.clips ?: emptyList()
-            val hasAudio = audioClips.isNotEmpty()
 
             muxer = MediaMuxer(outputFile.absolutePath, MUXER_OUTPUT_MPEG_4)
             val totalDurationMs = project.durationMs.coerceAtLeast(1L)
 
-            var audioMuxerTrackIndex = -1
-            if (hasAudio) {
-                val firstAudioClip = audioClips.first()
-                val assetResult = assetRepository.getAssetById(firstAudioClip.assetId)
+            // Check if any clip actually has audio
+            var hasAudio = false
+            for (clip in videoClips) {
+                val assetResult = assetRepository.getAssetById(clip.assetId)
                 if (assetResult is AppResult.Success) {
-                    val audioUri = Uri.parse(assetResult.data.mediaUri)
-                    val audioFormat = getAudioTrackFormat(audioUri)
-                    if (audioFormat != null) {
-                        audioMuxerTrackIndex = muxer.addTrack(audioFormat)
+                    if (hasAudioTrack(Uri.parse(assetResult.data.mediaUri))) {
+                        hasAudio = true
+                        break
                     }
                 }
+            }
+            if (!hasAudio) {
+                for (clip in audioClips) {
+                    val assetResult = assetRepository.getAssetById(clip.assetId)
+                    if (assetResult is AppResult.Success) {
+                        if (hasAudioTrack(Uri.parse(assetResult.data.mediaUri))) {
+                            hasAudio = true
+                            break
+                        }
+                    }
+                }
+            }
+
+            var audioMuxerTrackIndex = -1
+            if (hasAudio) {
+                val audioFormat = MediaFormat.createAudioFormat("audio/mp4a-latm", 44100, 2).apply {
+                    setInteger(MediaFormat.KEY_BIT_RATE, 128000)
+                    setInteger(MediaFormat.KEY_AAC_PROFILE, android.media.MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                }
+                audioMuxerTrackIndex = muxer.addTrack(audioFormat)
             }
 
             // ── Video transcode ──
@@ -118,14 +140,44 @@ class MediaCodecExportEngine @Inject constructor(
                 isCancelled = { cancellationFlag.get() },
             )
 
-            // ── Audio pass-through (all audio clips) ──
+            // ── Audio decoding, mixing, and encoding ──
             if (audioMuxerTrackIndex >= 0) {
-                transcodeAudioPassThrough(
-                    audioClips = audioClips,
-                    muxer = muxer,
-                    audioMuxerTrackIndex = audioMuxerTrackIndex,
-                    isCancelled = { cancellationFlag.get() },
-                )
+                emit(ExportProgress.InProgress(0.9f, totalDurationMs))
+                
+                val totalSamples = ((totalDurationMs * 44100) / 1000).toInt() * 2
+                val masterPcm = ShortArray(totalSamples)
+                
+                for (clip in videoClips) {
+                    if (cancellationFlag.get()) break
+                    val assetResult = assetRepository.getAssetById(clip.assetId)
+                    if (assetResult is AppResult.Success) {
+                        val uri = Uri.parse(assetResult.data.mediaUri)
+                        val pcm = decodeAudioToPcm(
+                            uri, clip.trimStartMs, clip.trimEndMs,
+                            clip.speedFactor, clip.volume, 44100, 2
+                        )
+                        if (pcm != null) {
+                            mixPcmIntoMaster(masterPcm, pcm, clip.timelinePositionMs)
+                        }
+                    }
+                }
+                
+                for (clip in audioClips) {
+                    if (cancellationFlag.get()) break
+                    val assetResult = assetRepository.getAssetById(clip.assetId)
+                    if (assetResult is AppResult.Success) {
+                        val uri = Uri.parse(assetResult.data.mediaUri)
+                        val pcm = decodeAudioToPcm(
+                            uri, clip.trimStartMs, clip.trimEndMs,
+                            clip.speedFactor, clip.volume, 44100, 2
+                        )
+                        if (pcm != null) {
+                            mixPcmIntoMaster(masterPcm, pcm, clip.timelinePositionMs)
+                        }
+                    }
+                }
+                
+                encodeAndMuxAudio(masterPcm, muxer, audioMuxerTrackIndex) { cancellationFlag.get() }
             }
 
             muxer.stop()
@@ -149,6 +201,40 @@ class MediaCodecExportEngine @Inject constructor(
     }.flowOn(Dispatchers.Default)
 
     // ── Video transcode (decoder → encoder surface) ──────────────────────────
+
+    private fun loadOverlayBitmap(uriString: String): android.graphics.Bitmap? {
+        return try {
+            val uri = Uri.parse(uriString)
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                android.graphics.BitmapFactory.decodeStream(inputStream)
+            }
+        } catch (e: Exception) {
+            Logger.w(TAG, "Failed to load overlay image: $uriString")
+            null
+        }
+    }
+
+    private fun renderTextToBitmap(
+        text: String,
+        textColor: Int,
+        textSize: Float,
+        positionX: Float,
+        positionY: Float,
+        width: Int,
+        height: Int
+    ): android.graphics.Bitmap {
+        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = textColor
+            this.textSize = textSize
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        val x = positionX * width
+        val y = positionY * height - (paint.descent() + paint.ascent()) / 2f
+        canvas.drawText(text, x, y, paint)
+        return bitmap
+    }
 
     private fun getAudioTrackFormat(sourceUri: Uri): MediaFormat? {
         val extractor = MediaExtractor()
@@ -324,11 +410,23 @@ class MediaCodecExportEngine @Inject constructor(
                                                 if (frameTimelineTimeMs >= otherClip.timelinePositionMs && frameTimelineTimeMs <= otherClip.timelineEndMs) {
                                                     activeEffects.addAll(otherClip.effects)
                                                 }
-                                            }
-                                        }
-                                        var brightnessVal = 1.0f
+                                             }
+                                         }
+                                         var brightnessVal = 1.0f
                                         var contrastVal = 1.0f
                                         var saturationVal = 1.0f
+                                        var vintageVal = 0.0f
+                                        var vignetteVal = 0.0f
+
+                                        when (val f = clip.filter) {
+                                            is VideoFilter.Brightness -> brightnessVal = f.value + 1.0f
+                                            is VideoFilter.Contrast -> contrastVal = f.value
+                                            is VideoFilter.Saturation -> saturationVal = f.value
+                                            is VideoFilter.Vintage -> vintageVal = f.intensity
+                                            is VideoFilter.Vignette -> vignetteVal = f.radius
+                                            else -> {}
+                                        }
+
                                         for (effect in activeEffects) {
                                             when (effect.type) {
                                                 EffectType.BRIGHTNESS -> brightnessVal *= (effect.parameters["intensity"] ?: 1.0f)
@@ -340,10 +438,54 @@ class MediaCodecExportEngine @Inject constructor(
                                         renderer.brightness = brightnessVal
                                         renderer.contrast = contrastVal
                                         renderer.saturation = saturationVal
+                                        renderer.vintage = vintageVal
+                                        renderer.vignette = vignetteVal
 
                                         decoder.releaseOutputBuffer(outBufId, true)
                                         renderer.awaitFrame(2500L)
                                         renderer.drawFrame()
+
+                                        // Draw Overlay tracks
+                                        val activeOverlayTracks = timeline.tracks.filter { it.type == TrackType.OVERLAY }
+                                        for (track in activeOverlayTracks) {
+                                            for (overlayClip in track.clips) {
+                                                if (frameTimelineTimeMs >= overlayClip.timelinePositionMs && frameTimelineTimeMs <= overlayClip.timelineEndMs) {
+                                                    val overlayAssetResult = assetRepository.getAssetById(overlayClip.assetId)
+                                                    if (overlayAssetResult is AppResult.Success) {
+                                                        val overlayBitmap = loadOverlayBitmap(overlayAssetResult.data.mediaUri)
+                                                        if (overlayBitmap != null) {
+                                                             renderer.drawOverlay(overlayBitmap, 0f, 0f, 1f, 1f)
+                                                             overlayBitmap.recycle()
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Draw Text tracks
+                                        val activeTextTracks = timeline.tracks.filter { it.type == TrackType.TEXT }
+                                        for (track in activeTextTracks) {
+                                            for (textClip in track.clips) {
+                                                if (frameTimelineTimeMs >= textClip.timelinePositionMs && frameTimelineTimeMs <= textClip.timelineEndMs) {
+                                                    val style = textClip.textStyle
+                                                    if (style != null) {
+                                                        val textBitmap = renderTextToBitmap(
+                                                            text = style.text,
+                                                            textColor = style.color,
+                                                            textSize = style.fontSize,
+                                                            positionX = style.positionX,
+                                                            positionY = style.positionY,
+                                                            width = outWidth,
+                                                            height = outHeight
+                                                        )
+                                                        renderer.drawOverlay(textBitmap, 0f, 0f, 2f, 2f)
+                                                        textBitmap.recycle()
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        renderer.swapBuffers()
                                         renderer.setPresentationTime(outputPtsUs * 1000L)
                                         decoderOutputAvailable = false
                                     }
@@ -417,74 +559,262 @@ class MediaCodecExportEngine @Inject constructor(
 
     // ── Audio pass-through (all audio clips) ─────────────────────────────────
 
-    private suspend fun transcodeAudioPassThrough(
-        audioClips: List<Clip>,
-        muxer: MediaMuxer,
-        audioMuxerTrackIndex: Int,
-        isCancelled: () -> Boolean,
-    ) {
-        // NOTE: Speed changes (speedFactor) apply exclusively to primary VIDEO track clips by design.
-        // Background AUDIO track clips are intended to stay at normal (1.0x) speed and are copied raw
-        // via pass-through mode without decoding/resampling to prevent audio drift or distortion.
-        if (audioMuxerTrackIndex < 0) return
-        var runningAudioPresentationTimeOffsetUs = 0L
-
-        for (audioClip in audioClips) {
-            if (isCancelled()) break
-            val assetResult = assetRepository.getAssetById(audioClip.assetId)
-            if (assetResult !is AppResult.Success) continue
-            val uri = Uri.parse(assetResult.data.mediaUri)
-
-            val extractor = MediaExtractor()
-            try {
-                extractor.setDataSource(context, uri, null)
-                val audioIdx = (0 until extractor.trackCount).firstOrNull { idx ->
-                    extractor.getTrackFormat(idx).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-                } ?: continue
-                extractor.selectTrack(audioIdx)
-
-                val trimStartUs = audioClip.trimStartMs * 1000L
-                val trimEndUs = audioClip.trimEndMs * 1000L
-                extractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-
-                val bufferInfo = MediaCodec.BufferInfo()
-                val maxBuf = 1024 * 1024
-                val buf = ByteBuffer.allocate(maxBuf)
-                var done = false
-                while (!done && !isCancelled()) {
-                    buf.clear()
-                    val sampleSize = extractor.readSampleData(buf, 0)
-                    if (sampleSize < 0) break
-                    val sampleTime = extractor.sampleTime
-                    if (sampleTime >= trimEndUs) break
-
-                    val relativeUs = sampleTime - trimStartUs
-                    if (relativeUs < 0) {
-                        extractor.advance()
-                        continue
-                    }
-
-                    val outputPtsUs = runningAudioPresentationTimeOffsetUs + relativeUs
-
-                    bufferInfo.apply {
-                        offset = 0
-                        size = sampleSize
-                        presentationTimeUs = outputPtsUs
-                        flags = extractor.sampleFlags
-                    }
-                    buf.position(0); buf.limit(sampleSize)
-                    muxer.writeSampleData(audioMuxerTrackIndex, buf, bufferInfo)
-                    extractor.advance()
-                }
-            } catch (e: Exception) {
-                Logger.w(TAG, "Audio pass-through skipped for clip ${audioClip.id}: ${e.message}")
-            } finally {
-                extractor.release()
-            }
-
-            val clipDurationUs = (audioClip.trimEndMs - audioClip.trimStartMs) * 1000L
-            runningAudioPresentationTimeOffsetUs += clipDurationUs
+    private fun hasAudioTrack(uri: Uri): Boolean {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            return findAudioTrack(extractor) >= 0
+        } catch (e: Exception) {
+            return false
+        } finally {
+            extractor.release()
         }
+    }
+
+    private fun findAudioTrack(extractor: MediaExtractor): Int {
+        return (0 until extractor.trackCount).firstOrNull { idx ->
+            extractor.getTrackFormat(idx).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+        } ?: -1
+    }
+
+    private fun decodeAudioToPcm(
+        uri: Uri,
+        trimStartMs: Long,
+        trimEndMs: Long,
+        speedFactor: Float,
+        volume: Float,
+        targetSampleRate: Int,
+        targetChannels: Int
+    ): ShortArray? {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            val audioIdx = findAudioTrack(extractor)
+            if (audioIdx < 0) return null
+            extractor.selectTrack(audioIdx)
+            val format = extractor.getTrackFormat(audioIdx)
+            
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+            val decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(format, null, null, 0)
+            decoder.start()
+            
+            val sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
+            val channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
+            
+            val trimStartUs = trimStartMs * 1000L
+            val trimEndUs = trimEndMs * 1000L
+            extractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+            
+            val bufferInfo = MediaCodec.BufferInfo()
+            val pcmBytes = java.io.ByteArrayOutputStream()
+            
+            var inputDone = false
+            var outputDone = false
+            
+            while (!outputDone) {
+                if (!inputDone) {
+                    val inputBufIdx = decoder.dequeueInputBuffer(TIMEOUT_US)
+                    if (inputBufIdx >= 0) {
+                        val inputBuf = decoder.getInputBuffer(inputBufIdx)!!
+                        val sampleSize = extractor.readSampleData(inputBuf, 0)
+                        val sampleTime = extractor.sampleTime
+                        if (sampleSize < 0 || sampleTime >= trimEndUs) {
+                            decoder.queueInputBuffer(inputBufIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            decoder.queueInputBuffer(inputBufIdx, 0, sampleSize, sampleTime, extractor.sampleFlags)
+                            extractor.advance()
+                        }
+                    }
+                }
+                
+                var outAvailable = true
+                while (outAvailable && !outputDone) {
+                    val outBufIdx = decoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
+                    when {
+                        outBufIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> outAvailable = false
+                        outBufIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {}
+                        outBufIdx >= 0 -> {
+                            val outBuf = decoder.getOutputBuffer(outBufIdx)!!
+                            if (bufferInfo.size > 0 && bufferInfo.presentationTimeUs >= trimStartUs) {
+                                val chunk = ByteArray(bufferInfo.size)
+                                outBuf.position(bufferInfo.offset)
+                                outBuf.get(chunk)
+                                pcmBytes.write(chunk)
+                            }
+                            decoder.releaseOutputBuffer(outBufIdx, false)
+                            if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                outputDone = true
+                            }
+                        }
+                    }
+                }
+            }
+            decoder.stop()
+            decoder.release()
+            
+            val rawBytes = pcmBytes.toByteArray()
+            val rawShorts = ShortArray(rawBytes.size / 2)
+            ByteBuffer.wrap(rawBytes)
+                .order(java.nio.ByteOrder.nativeOrder())
+                .asShortBuffer()
+                .get(rawShorts)
+                
+            return processAndResamplePcm(
+                rawShorts, sampleRate, channelCount,
+                targetSampleRate, targetChannels, speedFactor, volume
+            )
+        } catch (e: Exception) {
+            Logger.w(TAG, "Failed to decode audio to PCM for URI $uri: ${e.message}")
+            return null
+        } finally {
+            extractor.release()
+        }
+    }
+
+    private fun processAndResamplePcm(
+        shorts: ShortArray,
+        srcSampleRate: Int,
+        srcChannels: Int,
+        dstSampleRate: Int,
+        dstChannels: Int,
+        speedFactor: Float,
+        volume: Float
+    ): ShortArray {
+        val speedAdjustedRate = srcSampleRate * speedFactor
+        val ratio = speedAdjustedRate / dstSampleRate
+        
+        val srcFrames = shorts.size / srcChannels
+        val dstFrames = (srcFrames / ratio).toInt().coerceAtLeast(1)
+        val dstShorts = ShortArray(dstFrames * dstChannels)
+        
+        for (i in 0 until dstFrames) {
+            val srcFrameIdx = (i * ratio).toInt().coerceIn(0, srcFrames - 1)
+            
+            val val1: Short
+            val val2: Short
+            if (srcChannels == 1) {
+                if (srcFrameIdx < shorts.size) {
+                    val1 = shorts[srcFrameIdx]
+                    val2 = val1
+                } else {
+                    val1 = 0
+                    val2 = 0
+                }
+            } else {
+                if (srcFrameIdx * 2 + 1 < shorts.size) {
+                    val1 = shorts[srcFrameIdx * 2]
+                    val2 = shorts[srcFrameIdx * 2 + 1]
+                } else {
+                    val1 = 0
+                    val2 = 0
+                }
+            }
+            
+            val scaledVal1 = (val1 * volume).toInt().coerceIn(-32768, 32767).toShort()
+            val scaledVal2 = (val2 * volume).toInt().coerceIn(-32768, 32767).toShort()
+            
+            if (dstChannels == 1) {
+                dstShorts[i] = ((scaledVal1.toInt() + scaledVal2.toInt()) / 2).toShort()
+            } else {
+                dstShorts[i * 2] = scaledVal1
+                dstShorts[i * 2 + 1] = scaledVal2
+            }
+        }
+        return dstShorts
+    }
+
+    private fun mixPcmIntoMaster(master: ShortArray, src: ShortArray, startMs: Long) {
+        val destStartSample = ((startMs * 44100) / 1000).toInt() * 2
+        val lengthToMix = Math.min(src.size, master.size - destStartSample)
+        for (i in 0 until lengthToMix) {
+            if (destStartSample + i in master.indices) {
+                val sum = master[destStartSample + i] + src[i]
+                master[destStartSample + i] = sum.coerceIn(-32768, 32767).toShort()
+            }
+        }
+    }
+
+    private fun encodeAndMuxAudio(
+        pcm: ShortArray,
+        muxer: MediaMuxer,
+        audioTrackIdx: Int,
+        isCancelled: () -> Boolean
+    ) {
+        val encoder = MediaCodec.createEncoderByType("audio/mp4a-latm")
+        val format = MediaFormat.createAudioFormat("audio/mp4a-latm", 44100, 2).apply {
+            setInteger(MediaFormat.KEY_BIT_RATE, 128000)
+            setInteger(MediaFormat.KEY_AAC_PROFILE, android.media.MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+        }
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+        
+        val bufferInfo = MediaCodec.BufferInfo()
+        var inputDone = false
+        var outputDone = false
+        
+        var pcmOffset = 0
+        val pcmBuffer = ByteBuffer.allocate(pcm.size * 2).apply {
+            order(java.nio.ByteOrder.nativeOrder())
+            asShortBuffer().put(pcm)
+        }
+        
+        var presentationTimeUs = 0L
+        
+        while (!outputDone && !isCancelled()) {
+            if (!inputDone) {
+                val inputBufIdx = encoder.dequeueInputBuffer(TIMEOUT_US)
+                if (inputBufIdx >= 0) {
+                    val inputBuf = encoder.getInputBuffer(inputBufIdx)!!
+                    inputBuf.clear()
+                    
+                    val remainingBytes = pcmBuffer.capacity() - pcmOffset
+                    val bytesToCopy = Math.min(inputBuf.capacity(), remainingBytes)
+                    
+                    if (bytesToCopy <= 0) {
+                        encoder.queueInputBuffer(inputBufIdx, 0, 0, presentationTimeUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        inputDone = true
+                    } else {
+                        pcmBuffer.position(pcmOffset)
+                        val slice = pcmBuffer.slice().limit(bytesToCopy) as ByteBuffer
+                        inputBuf.put(slice)
+                        
+                        encoder.queueInputBuffer(inputBufIdx, 0, bytesToCopy, presentationTimeUs, 0)
+                        
+                        val framesCopied = bytesToCopy / 4
+                        presentationTimeUs += (framesCopied * 1000000L) / 44100
+                        pcmOffset += bytesToCopy
+                    }
+                }
+            }
+            
+            var outAvailable = true
+            while (outAvailable && !outputDone) {
+                val outBufIdx = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
+                when {
+                    outBufIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> outAvailable = false
+                    outBufIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {}
+                    outBufIdx >= 0 -> {
+                        val outBuf = encoder.getOutputBuffer(outBufIdx)!!
+                        if (bufferInfo.size > 0 && (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                            outBuf.position(bufferInfo.offset)
+                            outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                            muxer.writeSampleData(audioTrackIdx, outBuf, bufferInfo)
+                        }
+                        encoder.releaseOutputBuffer(outBufIdx, false)
+                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                            outputDone = true
+                        }
+                    }
+                }
+            }
+        }
+        try {
+            encoder.stop()
+        } catch (e: Exception) {}
+        encoder.release()
     }
 
     // ── Output file + MediaStore registration ───────────────────────────────

@@ -64,12 +64,59 @@ class GLFilterRenderer(
         uniform float uBrightness;
         uniform float uContrast;
         uniform float uSaturation;
+        uniform float uVintage;
+        uniform float uVignette;
+        uniform float uLut;
+        uniform sampler2D uLutTexture;
         void main() {
             vec4 color = texture2D(sTexture, vTextureCoord);
             vec3 rgb = color.rgb * uBrightness;
             rgb = (rgb - 0.5) * uContrast + 0.5;
             float luma = dot(rgb, vec3(0.299, 0.587, 0.114));
             rgb = mix(vec3(luma), rgb, uSaturation);
+            
+            if (uVintage > 0.0) {
+                vec3 sepia = vec3(
+                    dot(rgb, vec3(0.393, 0.769, 0.189)),
+                    dot(rgb, vec3(0.349, 0.686, 0.168)),
+                    dot(rgb, vec3(0.272, 0.534, 0.131))
+                );
+                rgb = mix(rgb, sepia, uVintage);
+            }
+            
+            if (uVignette > 0.0) {
+                vec2 uv = vTextureCoord - 0.5;
+                float dist = length(uv);
+                float vfactor = smoothstep(0.8 - uVignette * 0.4, 0.4 - uVignette * 0.2, dist);
+                rgb *= vfactor;
+            }
+            
+            if (uLut > 0.0) {
+                float blueColor = rgb.b * 63.0;
+                
+                vec2 quad1;
+                quad1.y = floor(floor(blueColor) / 8.0);
+                quad1.x = floor(blueColor) - (quad1.y * 8.0);
+                
+                vec2 quad2;
+                quad2.y = floor(ceil(blueColor) / 8.0);
+                quad2.x = ceil(blueColor) - (quad2.y * 8.0);
+                
+                vec2 texPos1;
+                texPos1.x = (quad1.x * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * rgb.r);
+                texPos1.y = (quad1.y * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * rgb.g);
+                
+                vec2 texPos2;
+                texPos2.x = (quad2.x * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * rgb.r);
+                texPos2.y = (quad2.y * 0.125) + 0.5/512.0 + ((0.125 - 1.0/512.0) * rgb.g);
+                
+                vec3 newColor1 = texture2D(uLutTexture, texPos1).rgb;
+                vec3 newColor2 = texture2D(uLutTexture, texPos2).rgb;
+                
+                vec3 lutColor = mix(newColor1, newColor2, fract(blueColor));
+                rgb = mix(rgb, lutColor, uLut);
+            }
+            
             gl_FragColor = vec4(clamp(rgb, 0.0, 1.0), color.a);
         }
     """.trimIndent()
@@ -86,6 +133,11 @@ class GLFilterRenderer(
     private var uBrightnessHandle = -1
     private var uContrastHandle = -1
     private var uSaturationHandle = -1
+    private var uVintageHandle = -1
+    private var uVignetteHandle = -1
+    private var uLutHandle = -1
+    private var uLutTextureHandle = -1
+    private var lutTextureId = -1
 
     private val stMatrix = FloatArray(16)
     var surfaceTexture: SurfaceTexture? = null
@@ -101,6 +153,11 @@ class GLFilterRenderer(
     var brightness: Float = 1.0f
     var contrast: Float = 1.0f
     var saturation: Float = 1.0f
+    var vintage: Float = 0.0f
+    var vignette: Float = 0.0f
+    var lutStrength: Float = 0.0f
+    var lutTextureBitmap: android.graphics.Bitmap? = null
+    var lutChanged: Boolean = false
 
     init {
         triangleVertices = ByteBuffer.allocateDirect(triangleVerticesData.size * FLOAT_SIZE_BYTES)
@@ -180,15 +237,27 @@ class GLFilterRenderer(
         uBrightnessHandle = GLES20.glGetUniformLocation(program, "uBrightness")
         uContrastHandle = GLES20.glGetUniformLocation(program, "uContrast")
         uSaturationHandle = GLES20.glGetUniformLocation(program, "uSaturation")
+        uVintageHandle = GLES20.glGetUniformLocation(program, "uVintage")
+        uVignetteHandle = GLES20.glGetUniformLocation(program, "uVignette")
+        uLutHandle = GLES20.glGetUniformLocation(program, "uLut")
+        uLutTextureHandle = GLES20.glGetUniformLocation(program, "uLutTexture")
 
-        val textures = IntArray(1)
-        GLES20.glGenTextures(1, textures, 0)
+        val textures = IntArray(2)
+        GLES20.glGenTextures(2, textures, 0)
         textureId = textures[0]
+        lutTextureId = textures[1]
+
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
         GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST.toFloat())
         GLES20.glTexParameterf(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR.toFloat())
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTextureId)
+        GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR.toFloat())
+        GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR.toFloat())
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
 
         surfaceTexture = SurfaceTexture(textureId)
         surfaceTexture?.setOnFrameAvailableListener(this, callbackHandler)
@@ -255,12 +324,130 @@ class GLFilterRenderer(
         GLES20.glUniform1f(uBrightnessHandle, brightness)
         GLES20.glUniform1f(uContrastHandle, contrast)
         GLES20.glUniform1f(uSaturationHandle, saturation)
+        GLES20.glUniform1f(uVintageHandle, vintage)
+        GLES20.glUniform1f(uVignetteHandle, vignette)
+        GLES20.glUniform1f(uLutHandle, lutStrength)
+
+        if (lutStrength > 0f && lutTextureBitmap != null) {
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTextureId)
+            if (lutChanged) {
+                android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, lutTextureBitmap, 0)
+                lutChanged = false
+            }
+            GLES20.glUniform1i(uLutTextureHandle, 1)
+        }
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
         GLES20.glDisableVertexAttribArray(aPositionHandle)
         GLES20.glDisableVertexAttribArray(aTextureCoordHandle)
+    }
 
+    private var overlayProgram = -1
+    private var overlayAPositionHandle = -1
+    private var overlayATextureCoordHandle = -1
+    private var overlayTextureId = -1
+
+    private fun initOverlayShader() {
+        val vertexShader = """
+            attribute vec4 aPosition;
+            attribute vec2 aTextureCoord;
+            varying vec2 vTextureCoord;
+            void main() {
+                gl_Position = aPosition;
+                vTextureCoord = aTextureCoord;
+            }
+        """.trimIndent()
+
+        val fragmentShader = """
+            precision medium float;
+            varying vec2 vTextureCoord;
+            uniform sampler2D sTexture2D;
+            void main() {
+                gl_FragColor = texture2D(sTexture2D, vTextureCoord);
+            }
+        """.trimIndent()
+
+        overlayProgram = createProgram(vertexShader, fragmentShader)
+        overlayAPositionHandle = GLES20.glGetAttribLocation(overlayProgram, "aPosition")
+        overlayATextureCoordHandle = GLES20.glGetAttribLocation(overlayProgram, "aTextureCoord")
+        
+        val textures = IntArray(1)
+        GLES20.glGenTextures(1, textures, 0)
+        overlayTextureId = textures[0]
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId)
+        GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR.toFloat())
+        GLES20.glTexParameterf(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR.toFloat())
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+    }
+
+    private fun createProgram(vertexSource: String, fragmentSource: String): Int {
+        val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexSource)
+        val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentSource)
+        val prog = GLES20.glCreateProgram()
+        GLES20.glAttachShader(prog, vertexShader)
+        GLES20.glAttachShader(prog, fragmentShader)
+        GLES20.glLinkProgram(prog)
+        val linkStatus = IntArray(1)
+        GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, linkStatus, 0)
+        if (linkStatus[0] != GLES20.GL_TRUE) {
+            val log = GLES20.glGetProgramInfoLog(prog)
+            GLES20.glDeleteProgram(prog)
+            return -1
+        }
+        return prog
+    }
+
+    fun drawOverlay(bitmap: android.graphics.Bitmap, x: Float, y: Float, w: Float, h: Float) {
+        makeCurrent()
+        if (overlayProgram == -1) {
+            initOverlayShader()
+        }
+        
+        GLES20.glUseProgram(overlayProgram)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTextureId)
+        android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        
+        val x1 = x - w / 2f
+        val x2 = x + w / 2f
+        val y1 = y - h / 2f
+        val y2 = y + h / 2f
+        
+        val vertices = floatArrayOf(
+            x1, y1, 0.0f, 0.0f, 1.0f,
+            x2, y1, 0.0f, 1.0f, 1.0f,
+            x1, y2, 0.0f, 0.0f, 0.0f,
+            x2, y2, 0.0f, 1.0f, 0.0f
+        )
+        val vertexBuffer = ByteBuffer.allocateDirect(vertices.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        vertexBuffer.put(vertices)
+        vertexBuffer.position(0)
+        
+        vertexBuffer.position(0)
+        GLES20.glVertexAttribPointer(overlayAPositionHandle, 3, GLES20.GL_FLOAT, false, 5 * 4, vertexBuffer)
+        GLES20.glEnableVertexAttribArray(overlayAPositionHandle)
+        
+        vertexBuffer.position(3)
+        GLES20.glVertexAttribPointer(overlayATextureCoordHandle, 2, GLES20.GL_FLOAT, false, 5 * 4, vertexBuffer)
+        GLES20.glEnableVertexAttribArray(overlayATextureCoordHandle)
+        
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        
+        GLES20.glDisableVertexAttribArray(overlayAPositionHandle)
+        GLES20.glDisableVertexAttribArray(overlayATextureCoordHandle)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    fun swapBuffers() {
+        makeCurrent()
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
     }
 

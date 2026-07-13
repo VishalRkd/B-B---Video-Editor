@@ -79,6 +79,46 @@ class AddAudioTrackUseCaseTest {
     }
 
     @Test
+    fun `splits existing clip into left and right fragments when new clip is inserted in the middle`() {
+        val existing = Track(
+            id = "audio_track",
+            type = TrackType.AUDIO,
+            clips = listOf(
+                com.beatsandbeyond.video_editor.core.domain.model.Clip(
+                    id = "c1", assetId = "other", timelinePositionMs = 0L,
+                    trimStartMs = 0L, trimEndMs = 10000L,
+                )
+            ),
+        )
+        val timeline = Timeline(id = "t", tracks = listOf(existing))
+        val proj = project.copy(timeline = timeline)
+
+        // Add 5s audio clip at 3s timeline position
+        val shortAsset = audioAsset.copy(durationMs = 5000L)
+        val result = useCase(proj, shortAsset, timelinePositionMs = 3000L)
+        assertTrue(result is AppResult.Success)
+
+        val audioTrack = (result as AppResult.Success).data.timeline.tracks.first { it.type == TrackType.AUDIO }
+        // Left fragment (0-3s), inserted clip (3-8s), right fragment (8-15s)
+        assertEquals(3, audioTrack.clips.size)
+
+        val first = audioTrack.clips[0]
+        assertEquals(0L, first.timelinePositionMs)
+        assertEquals(3000L, first.timelineEndMs)
+        assertEquals(3000L, first.trimEndMs)
+
+        val second = audioTrack.clips[1]
+        assertEquals(3000L, second.timelinePositionMs)
+        assertEquals(8000L, second.timelineEndMs)
+
+        val third = audioTrack.clips[2]
+        assertEquals(8000L, third.timelinePositionMs)
+        assertEquals(10000L, third.timelineEndMs)
+        assertEquals(8000L, third.trimStartMs)
+        assertEquals(10000L, third.trimEndMs)
+    }
+
+    @Test
     fun `rejects asset with no duration`() {
         val bad = audioAsset.copy(durationMs = 0L)
         val result = useCase(project, bad)

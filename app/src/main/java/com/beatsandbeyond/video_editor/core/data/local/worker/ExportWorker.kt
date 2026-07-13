@@ -3,8 +3,10 @@ package com.beatsandbeyond.video_editor.core.data.local.worker
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
@@ -130,14 +132,17 @@ class ExportWorker(
             }
 
             if (exportSuccess) {
+                showSuccessNotification(outputPath)
                 Result.success(workDataOf(
                     KEY_STATE to "COMPLETED",
                     KEY_COMPLETED_PATH to outputPath
                 ))
             } else {
+                showFailureNotification(errorMsg ?: "Export failed")
                 Result.failure(workDataOf(KEY_ERROR to (errorMsg ?: "Export failed")))
             }
         } catch (e: Exception) {
+            showFailureNotification(e.message ?: "Unknown error")
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Unknown error")))
         } finally {
             if (isStopped) {
@@ -158,7 +163,15 @@ class ExportWorker(
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", intent)
             .build()
 
-        return ForegroundInfo(NOTIFICATION_ID, notification)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ForegroundInfo(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun createNotificationChannel() {
@@ -170,6 +183,68 @@ class ExportWorker(
             )
             val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showSuccessNotification(outputPath: String) {
+        try {
+            val authority = "${applicationContext.packageName}.fileprovider"
+            val contentUri = FileProvider.getUriForFile(applicationContext, authority, java.io.File(outputPath))
+            
+            val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, "video/*")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                applicationContext,
+                0,
+                playIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            val successNotification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+                .setContentTitle("Export completed")
+                .setContentText("Tap to play your exported video")
+                .setSmallIcon(android.R.drawable.ic_menu_save)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .build()
+                
+            val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIFICATION_ID + 1, successNotification)
+        } catch (e: Exception) {
+            com.beatsandbeyond.video_editor.core.utils.Logger.e("ExportWorker", "Failed to show success notification", e)
+        }
+    }
+
+    private fun showFailureNotification(errorMsg: String) {
+        try {
+            val launchIntent = applicationContext.packageManager.getLaunchIntentForPackage(applicationContext.packageName)?.apply {
+                putExtra("export_error", errorMsg)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            
+            val pendingIntent = android.app.PendingIntent.getActivity(
+                applicationContext,
+                0,
+                launchIntent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            val failureNotification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+                .setContentTitle("Export failed")
+                .setContentText("Tap to view error: $errorMsg")
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .build()
+                
+            val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIFICATION_ID + 2, failureNotification)
+        } catch (e: Exception) {
+            com.beatsandbeyond.video_editor.core.utils.Logger.e("ExportWorker", "Failed to show failure notification", e)
         }
     }
 }

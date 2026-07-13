@@ -15,6 +15,7 @@ import com.beatsandbeyond.video_editor.core.domain.repository.AssetRepository
 import com.beatsandbeyond.video_editor.core.domain.usecase.asset.GetAssetsByProjectIdUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.audio.AddAudioTrackUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.audio.SetClipVolumeUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.audio.ExtractWaveformUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddOverlayClipUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddTextClipUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.effects.ApplyFilterUseCase
@@ -70,6 +71,7 @@ class ProjectDetailViewModel @Inject constructor(
     private val addTextClipUseCase: AddTextClipUseCase,
     private val addOverlayClipUseCase: AddOverlayClipUseCase,
     private val applyFilterUseCase: ApplyFilterUseCase,
+    private val extractWaveformUseCase: ExtractWaveformUseCase,
     private val audioEngine: AudioEngine,
     private val exportEngine: ExportEngine,
     @ApplicationContext private val context: Context,
@@ -84,6 +86,8 @@ class ProjectDetailViewModel @Inject constructor(
 
     private val _waveforms = MutableStateFlow<Map<String, FloatArray>>(emptyMap())
     val waveforms: StateFlow<Map<String, FloatArray>> = _waveforms.asStateFlow()
+
+    val activeClipFilter: Flow<VideoFilter> = previewEngine.activeClipFilter
 
     /** One-shot export progress events for the UI to render. */
     private val _exportProgress = MutableSharedFlow<ExportProgress>(
@@ -699,7 +703,7 @@ class ProjectDetailViewModel @Inject constructor(
                 if (!_waveforms.value.containsKey(clip.assetId)) {
                     val asset = assetsMap[clip.assetId] ?: return@forEach
                     launchSafely {
-                        audioEngine.extractWaveform(asset).onSuccess { data ->
+                        extractWaveformUseCase(asset).onSuccess { data ->
                             _waveforms.update { it + (clip.assetId to data) }
                         }
                     }

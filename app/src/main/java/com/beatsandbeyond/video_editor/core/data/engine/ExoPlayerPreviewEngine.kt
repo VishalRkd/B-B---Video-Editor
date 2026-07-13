@@ -58,6 +58,10 @@ class ExoPlayerPreviewEngine @Inject constructor(
     private var player: ExoPlayer? = null
     private var audioPlayer: ExoPlayer? = null
     private var timelineClips: List<Clip> = emptyList()
+    private var timelineAudioClips: List<Clip> = emptyList()
+
+    private val _activeClipFilter = MutableStateFlow<com.beatsandbeyond.video_editor.core.domain.model.VideoFilter>(com.beatsandbeyond.video_editor.core.domain.model.VideoFilter.None)
+    override val activeClipFilter: Flow<com.beatsandbeyond.video_editor.core.domain.model.VideoFilter> = _activeClipFilter.asStateFlow()
 
     // Seek requested before the player finished preparing. Applied once STATE_READY.
     private var pendingSeekMs: Long? = null
@@ -99,6 +103,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
         if (clips.isEmpty()) {
             Logger.w(TAG, "Timeline has no clips — nothing to preview")
             timelineClips = emptyList()
+            timelineAudioClips = emptyList()
             _playbackState.value = PlaybackState.Idle
             player?.clearMediaItems()
             audioPlayer?.clearMediaItems()
@@ -135,6 +140,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
         val audioTrack = timeline.tracks.firstOrNull { it.type == TrackType.AUDIO }
         val audioClips = audioTrack?.clips ?: emptyList()
+        timelineAudioClips = audioClips
 
         val audioConcatenatingSource = ConcatenatingMediaSource()
         var currentAudioPosMs = 0L
@@ -323,6 +329,24 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
     // ── Position Polling ────────────────────────────────────────────────────
 
+    private fun updateVideoVolume(clip: Clip) {
+        val player = player ?: return
+        if (player.volume != clip.volume) {
+            player.volume = clip.volume
+        }
+    }
+
+    private fun updateAudioVolume(positionMs: Long) {
+        val audioPlayer = audioPlayer ?: return
+        val activeAudioClip = timelineAudioClips.firstOrNull {
+            positionMs >= it.timelinePositionMs && positionMs < it.timelineEndMs
+        }
+        val targetVolume = activeAudioClip?.volume ?: 1.0f
+        if (audioPlayer.volume != targetVolume) {
+            audioPlayer.volume = targetVolume
+        }
+    }
+
     private fun startPositionUpdates() {
         positionUpdateJob?.cancel()
         positionUpdateJob = scope.launch(dispatchers.main) {
@@ -335,6 +359,13 @@ class ExoPlayerPreviewEngine @Inject constructor(
                         val absolutePositionMs = currentClip.timelinePositionMs + 
                             (localOffsetMs / currentClip.speedFactor).toLong()
                         _currentPositionMs.value = absolutePositionMs
+                        
+                        updateVideoVolume(currentClip)
+                        updateAudioVolume(absolutePositionMs)
+                        
+                        if (_activeClipFilter.value != currentClip.filter) {
+                            _activeClipFilter.value = currentClip.filter
+                        }
                     }
                 }
                 delay(33) // ~30 fps updates

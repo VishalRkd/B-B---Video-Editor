@@ -7,6 +7,7 @@ import com.beatsandbeyond.video_editor.core.domain.model.Project
 import com.beatsandbeyond.video_editor.core.domain.model.Timeline
 import com.beatsandbeyond.video_editor.core.domain.model.Track
 import com.beatsandbeyond.video_editor.core.domain.model.TrackType
+import com.beatsandbeyond.video_editor.core.domain.model.insertAndResolveOverlaps
 import java.util.UUID
 import javax.inject.Inject
 
@@ -47,43 +48,10 @@ class AddAudioTrackUseCase @Inject constructor() {
                 )
             )
         } else {
-            val newClipsList = mutableListOf<Clip>()
-            for (c in audioTrack.clips) {
-                val clipStart = c.timelinePositionMs
-                val clipEnd = c.timelinePositionMs + c.durationOnTimelineMs
-
-                if (clipStart >= timelinePositionMs) {
-                    newClipsList.add(
-                        c.copy(timelinePositionMs = clipStart + asset.durationMs)
-                    )
-                } else if (clipStart < timelinePositionMs && clipEnd > timelinePositionMs) {
-                    val leftDuration = timelinePositionMs - clipStart
-                    val speed = c.speedFactor
-
-                    newClipsList.add(
-                        c.copy(
-                            trimEndMs = c.trimStartMs + (leftDuration * speed).toLong()
-                        )
-                    )
-                    newClipsList.add(
-                        c.copy(
-                            id = UUID.randomUUID().toString(),
-                            timelinePositionMs = timelinePositionMs + asset.durationMs,
-                            trimStartMs = c.trimStartMs + (leftDuration * speed).toLong(),
-                            trimEndMs = c.trimEndMs
-                        )
-                    )
-                } else {
-                    newClipsList.add(c)
-                }
-            }
-            newClipsList.add(clip)
-            newClipsList.sortBy { it.timelinePositionMs }
+            val updatedTrack = audioTrack.insertAndResolveOverlaps(clip)
             timeline.copy(
                 tracks = timeline.tracks.map { track ->
-                    if (track.id == audioTrack.id) {
-                        track.copy(clips = newClipsList)
-                    } else track
+                    if (track.id == audioTrack.id) updatedTrack else track
                 }
             )
         }

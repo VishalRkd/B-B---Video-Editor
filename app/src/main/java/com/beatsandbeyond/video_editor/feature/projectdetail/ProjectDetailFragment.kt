@@ -687,6 +687,14 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                 }
             }
         }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.activeClipFilter.collect { filter ->
+                    applyFilterToPreviewOverlay(filter)
+                }
+            }
+        }
     }
 
     private fun renderState(state: ProjectDetailUiState) {
@@ -1198,6 +1206,57 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             binding.snapIndicator.visibility = View.VISIBLE
         } else {
             binding.snapIndicator.visibility = View.GONE
+        }
+    }
+
+    private fun applyFilterToPreviewOverlay(filter: VideoFilter) {
+        val overlay = binding.filterPreviewOverlay
+        when (filter) {
+            is VideoFilter.None -> {
+                overlay.visibility = View.GONE
+                overlay.background = null
+            }
+            is VideoFilter.Vintage -> {
+                overlay.visibility = View.VISIBLE
+                overlay.setBackgroundColor(android.graphics.Color.argb((filter.intensity * 60).toInt().coerceIn(0, 255), 158, 118, 59))
+            }
+            is VideoFilter.Vignette -> {
+                overlay.visibility = View.VISIBLE
+                val colors = intArrayOf(android.graphics.Color.TRANSPARENT, android.graphics.Color.argb((filter.radius * 200).toInt().coerceIn(0, 255), 0, 0, 0))
+                val gd = android.graphics.drawable.GradientDrawable().apply {
+                    setGradientType(android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT)
+                    setColors(colors)
+                    gradientRadius = Math.max(overlay.width, overlay.height).toFloat() * 0.7f
+                }
+                overlay.background = gd
+            }
+            is VideoFilter.Brightness -> {
+                overlay.visibility = View.VISIBLE
+                val value = filter.value
+                if (value < 0) {
+                    overlay.setBackgroundColor(android.graphics.Color.argb((Math.abs(value) * 150).toInt().coerceIn(0, 255), 0, 0, 0))
+                } else {
+                    overlay.setBackgroundColor(android.graphics.Color.argb((value * 120).toInt().coerceIn(0, 255), 255, 255, 255))
+                }
+            }
+            is VideoFilter.Contrast -> {
+                overlay.visibility = View.VISIBLE
+                val value = filter.value
+                if (value > 1f) {
+                    overlay.setBackgroundColor(android.graphics.Color.argb(((value - 1f) * 30).toInt().coerceIn(0, 255), 255, 255, 255))
+                } else {
+                    overlay.setBackgroundColor(android.graphics.Color.argb(((1f - value) * 45).toInt().coerceIn(0, 255), 128, 128, 128))
+                }
+            }
+            is VideoFilter.Saturation -> {
+                overlay.visibility = View.VISIBLE
+                val value = filter.value
+                if (value < 1f) {
+                    overlay.setBackgroundColor(android.graphics.Color.argb(((1f - value) * 80).toInt().coerceIn(0, 255), 128, 128, 128))
+                } else {
+                    overlay.setBackgroundColor(android.graphics.Color.argb(((value - 1f) * 20).toInt().coerceIn(0, 255), 255, 128, 0))
+                }
+            }
         }
     }
 

@@ -28,6 +28,8 @@ data class Clip(
     val textStyle: TextStyle? = null,
     /** Visual filter applied to this clip (Phase 5). [VideoFilter.None] means no filter. */
     val filter: VideoFilter = VideoFilter.None,
+    /** Keyframe animations list (Phase 7) */
+    val animatableProperties: List<AnimatableProperty> = emptyList(),
 ) {
     /**
      * The duration of this clip on the timeline, accounting for speed.

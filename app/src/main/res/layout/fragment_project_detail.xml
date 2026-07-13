@@ -143,6 +143,14 @@
             android:layout_height="match_parent"
             android:layout_gravity="center" />
 
+        <!-- Filter Preview Overlay -->
+        <View
+            android:id="@+id/filterPreviewOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:visibility="gone" />
+
         <!-- Left overlay control panel -->
         <LinearLayout
             android:layout_width="wrap_content"

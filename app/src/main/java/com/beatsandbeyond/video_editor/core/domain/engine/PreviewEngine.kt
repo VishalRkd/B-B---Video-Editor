@@ -25,6 +25,9 @@ interface PreviewEngine {
     /** The current playback position in milliseconds as an observable [Flow]. */
     val currentPositionMs: Flow<Long>
 
+    /** The active filter at the current playback position. */
+    val activeClipFilter: Flow<com.beatsandbeyond.video_editor.core.domain.model.VideoFilter>
+
     /**
      * Attaches a rendering [Surface] to the engine.
      * Must be called before [play] or [seekTo].

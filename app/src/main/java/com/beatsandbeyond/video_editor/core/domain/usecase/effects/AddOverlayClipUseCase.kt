@@ -7,6 +7,7 @@ import com.beatsandbeyond.video_editor.core.domain.model.Project
 import com.beatsandbeyond.video_editor.core.domain.model.Timeline
 import com.beatsandbeyond.video_editor.core.domain.model.Track
 import com.beatsandbeyond.video_editor.core.domain.model.TrackType
+import com.beatsandbeyond.video_editor.core.domain.model.insertAndResolveOverlaps
 import java.util.UUID
 import javax.inject.Inject
 
@@ -48,16 +49,10 @@ class AddOverlayClipUseCase @Inject constructor() {
                 )
             )
         } else {
-            val newClips = overlayTrack.clips.map { c ->
-                if (c.timelinePositionMs >= timelinePositionMs.coerceAtLeast(0L)) {
-                    c.copy(timelinePositionMs = c.timelinePositionMs + clipDuration)
-                } else c
-            } + clip
+            val updatedTrack = overlayTrack.insertAndResolveOverlaps(clip)
             timeline.copy(
                 tracks = timeline.tracks.map { track ->
-                    if (track.id == overlayTrack.id) {
-                        track.copy(clips = newClips.sortedBy { it.timelinePositionMs })
-                    } else track
+                    if (track.id == overlayTrack.id) updatedTrack else track
                 }
             )
         }
