@@ -25,6 +25,7 @@ sealed class ProjectDetailUiState {
         val selectedClipIds: Set<String> = emptySet(), // all selected clips (group select)
         val canUndo: Boolean = false,
         val canRedo: Boolean = false,
+        val isImporting: Boolean = false,
     ) : ProjectDetailUiState() {
         val isPlaying: Boolean get() = playbackState == PlaybackState.Playing
     }

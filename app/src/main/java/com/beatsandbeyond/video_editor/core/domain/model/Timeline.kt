@@ -36,13 +36,44 @@ data class Timeline(
         get() = tracks.all { it.clips.isEmpty() }
 
     companion object {
-        /** Creates a new empty timeline with a single primary video track. */
-        fun empty(timelineId: String, primaryTrackId: String): Timeline = Timeline(
-            id = timelineId,
-            tracks = listOf(
-                Track(id = primaryTrackId, type = TrackType.VIDEO)
+        /** Creates a new timeline pre-populated with mock tracks and clips for the UI mockup. */
+        fun empty(timelineId: String, primaryTrackId: String): Timeline {
+            return Timeline(
+                id = timelineId,
+                tracks = listOf(
+                    Track(
+                        id = primaryTrackId, 
+                        type = TrackType.VIDEO,
+                        clips = emptyList()
+                    ),
+                    Track(
+                        id = java.util.UUID.randomUUID().toString(), 
+                        type = TrackType.AUDIO,
+                        clips = emptyList()
+                    ),
+                    Track(
+                        id = java.util.UUID.randomUUID().toString(), 
+                        type = TrackType.TEXT,
+                        clips = emptyList()
+                    ),
+                    Track(
+                        id = java.util.UUID.randomUUID().toString(), 
+                        type = TrackType.OVERLAY,
+                        clips = emptyList()
+                    ),
+                    Track(
+                        id = java.util.UUID.randomUUID().toString(), 
+                        type = TrackType.EFFECT,
+                        clips = emptyList()
+                    ),
+                    Track(
+                        id = java.util.UUID.randomUUID().toString(), 
+                        type = TrackType.ADJUSTMENT,
+                        clips = emptyList()
+                    )
+                )
             )
-        )
+        }
     }
 }
 

@@ -38,4 +38,8 @@ enum class TrackType {
     OVERLAY,
     /** Text and title overlays. */
     TEXT,
+    /** Visual effect filters applied to clips below it. */
+    EFFECT,
+    /** Color grading and adjustment layers. */
+    ADJUSTMENT,
 }

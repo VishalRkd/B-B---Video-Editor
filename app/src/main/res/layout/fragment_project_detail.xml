@@ -98,7 +98,7 @@
             android:layout_width="wrap_content"
             android:layout_height="32dp"
             android:layout_marginStart="@dimen/spacing_md"
-            android:backgroundTint="#00D4AA"
+            android:backgroundTint="@color/color_export_button"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
@@ -106,9 +106,9 @@
             android:paddingHorizontal="16dp"
             android:text="Export"
             android:textColor="#0D0C0E"
-            android:textSize="11sp"
+            android:textSize="14sp"
             android:textStyle="bold"
-            app:cornerRadius="16dp" />
+            app:cornerRadius="4dp" />
 
         <!-- More vertical menu dots -->
         <ImageView
@@ -116,8 +116,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp"
             android:layout_marginStart="@dimen/spacing_md"
-            android:src="@drawable/ic_plus"
-            android:rotation="45"
+            android:src="@drawable/ic_more_vert"
             android:padding="4dp"
             android:tint="@color/white"
             android:clickable="true"
@@ -153,7 +152,8 @@
             android:background="#801C1B1F"
             android:orientation="vertical"
             android:padding="6dp"
-            android:elevation="4dp">
+            android:elevation="4dp"
+            android:visibility="gone">
             <ImageView
                 android:id="@+id/btnOverlayGrid"
                 android:layout_width="24dp"
@@ -190,7 +190,8 @@
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingHorizontal="8dp"
-            android:elevation="4dp">
+            android:elevation="4dp"
+            android:visibility="gone">
             <ImageView
                 android:id="@+id/btnOverlayPlay"
                 android:layout_width="12dp"
@@ -221,6 +222,7 @@
             android:padding="6dp"
             android:tint="@color/white"
             android:elevation="4dp"
+            android:visibility="gone"
             android:contentDescription="Fullscreen Expand" />
 
         <com.google.android.material.progressindicator.CircularProgressIndicator
@@ -267,18 +269,35 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- Add Media Button -->
+        <!-- Left: Play icon and timecode -->
         <ImageView
-            android:id="@+id/btnMidAdd"
+            android:id="@+id/btnPlayLeft"
             android:layout_width="28dp"
             android:layout_height="28dp"
-            android:background="@drawable/bg_resolution_dropdown"
-            android:src="@drawable/ic_plus"
-            android:padding="6dp"
+            android:src="@drawable/ic_play"
+            android:padding="4dp"
             android:tint="@color/white"
             android:clickable="true"
             android:focusable="true"
-            android:contentDescription="Add Clip" />
+            android:contentDescription="Play" />
+
+        <TextView
+            android:id="@+id/txtTimecodeCurrent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="00:06 "
+            android:textColor="@color/color_export_button"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/txtTimecodeTotal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="/ 00:24"
+            android:textColor="#A9A8C0"
+            android:textSize="14sp" />
 
         <View
             android:layout_width="0dp"
@@ -299,51 +318,22 @@
                 android:layout_height="28dp"
                 android:src="@drawable/ic_skip_previous"
                 android:tint="@color/white"
-                android:layout_marginHorizontal="6dp"
+                android:layout_marginHorizontal="12dp"
                 android:clickable="true"
                 android:focusable="true"
                 android:contentDescription="Skip Prev" />
 
-            <!-- Frame Previous -->
+            <!-- Play/Pause Button -->
             <ImageView
-                android:id="@+id/btnFramePrev"
+                android:id="@+id/btnPlayPauseCenter"
                 android:layout_width="28dp"
                 android:layout_height="28dp"
-                android:src="@drawable/ic_frame_previous"
+                android:src="@drawable/ic_play"
                 android:tint="@color/white"
-                android:layout_marginHorizontal="6dp"
+                android:layout_marginHorizontal="12dp"
                 android:clickable="true"
                 android:focusable="true"
-                android:contentDescription="Frame Prev" />
-
-            <!-- Solid Main Play/Pause Button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnPlayPause"
-                style="@style/Widget.Material3.Button.IconButton"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
-                android:layout_marginHorizontal="8dp"
-                android:padding="0dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                android:insetLeft="0dp"
-                android:insetRight="0dp"
-                app:icon="@drawable/ic_play"
-                app:iconSize="20dp"
-                app:iconTint="@color/white"
-                android:contentDescription="@string/cd_play_pause" />
-
-            <!-- Frame Next -->
-            <ImageView
-                android:id="@+id/btnFrameNext"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:src="@drawable/ic_frame_next"
-                android:tint="@color/white"
-                android:layout_marginHorizontal="6dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:contentDescription="Frame Next" />
+                android:contentDescription="Play" />
 
             <!-- Skip Next Edit -->
             <ImageView
@@ -352,53 +342,12 @@
                 android:layout_height="28dp"
                 android:src="@drawable/ic_skip_next"
                 android:tint="@color/white"
-                android:layout_marginHorizontal="6dp"
+                android:layout_marginHorizontal="12dp"
                 android:clickable="true"
                 android:focusable="true"
                 android:contentDescription="Skip Next" />
 
         </LinearLayout>
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <!-- Magnet (magnetic snap) -->
-        <ImageView
-            android:id="@+id/btnMagnet"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:src="@drawable/ic_magnet"
-            android:tint="@color/white"
-            android:layout_marginHorizontal="6dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="Magnet Snap" />
-
-        <!-- Keyframe button -->
-        <ImageView
-            android:id="@+id/btnKeyframe"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:src="@drawable/ic_keyframe"
-            android:tint="@color/white"
-            android:layout_marginHorizontal="6dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="Add Keyframe" />
-
-        <!-- Expand timeline -->
-        <ImageView
-            android:id="@+id/btnExpand"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:src="@drawable/ic_timeline_expand"
-            android:tint="@color/white"
-            android:layout_marginHorizontal="6dp"
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="Fullscreen Timeline" />
 
     </LinearLayout>
 
@@ -407,11 +356,10 @@
         android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/color_editor_bottom_bar"
+        android:background="@color/color_background"
         android:orientation="vertical"
         android:paddingBottom="@dimen/spacing_md"
-        android:visibility="gone"
-        tools:visibility="visible"
+        android:visibility="visible"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
@@ -444,6 +392,12 @@
                     layout="@layout/layout_track_label" />
                 <include
                     android:id="@+id/labelOverlay"
+                    layout="@layout/layout_track_label" />
+                <include
+                    android:id="@+id/labelEffect"
+                    layout="@layout/layout_track_label" />
+                <include
+                    android:id="@+id/labelAdjustment"
                     layout="@layout/layout_track_label" />
             </LinearLayout>
 
@@ -486,28 +440,42 @@
                                 android:id="@+id/videoTrackLane"
                                 android:layout_width="match_parent"
                                 android:layout_height="@dimen/timeline_track_height"
-                                android:background="#1A191C" />
+                                android:background="@color/color_background" />
 
                             <!-- Audio Track Lane -->
                             <androidx.constraintlayout.widget.ConstraintLayout
                                 android:id="@+id/audioTrackLane"
                                 android:layout_width="match_parent"
                                 android:layout_height="@dimen/timeline_track_height"
-                                android:background="#0D2220" />
+                                android:background="@color/color_background" />
 
                             <!-- Text Track Lane -->
                             <androidx.constraintlayout.widget.ConstraintLayout
                                 android:id="@+id/textTrackLane"
                                 android:layout_width="match_parent"
                                 android:layout_height="@dimen/timeline_track_height"
-                                android:background="#221C14" />
+                                android:background="@color/color_background" />
 
                             <!-- Overlay Track Lane -->
                             <androidx.constraintlayout.widget.ConstraintLayout
                                 android:id="@+id/overlayTrackLane"
                                 android:layout_width="match_parent"
                                 android:layout_height="@dimen/timeline_track_height"
-                                android:background="#1C1422" />
+                                android:background="@color/color_background" />
+
+                            <!-- Effect Track Lane -->
+                            <androidx.constraintlayout.widget.ConstraintLayout
+                                android:id="@+id/effectTrackLane"
+                                android:layout_width="match_parent"
+                                android:layout_height="@dimen/timeline_track_height"
+                                android:background="@color/color_background" />
+
+                            <!-- Adjustment Track Lane -->
+                            <androidx.constraintlayout.widget.ConstraintLayout
+                                android:id="@+id/adjustmentTrackLane"
+                                android:layout_width="match_parent"
+                                android:layout_height="@dimen/timeline_track_height"
+                                android:background="@color/color_background" />
 
                         </LinearLayout>
                     </LinearLayout>
@@ -527,8 +495,7 @@
         <include
             android:id="@+id/contextToolbar"
             layout="@layout/partial_editor_bottom_toolbar"
-            android:visibility="gone"
-            tools:visibility="visible" />
+            android:visibility="invisible" />
 
     </LinearLayout>
 
@@ -554,5 +521,42 @@
         app:layout_constraintBottom_toBottomOf="@id/timelineSection"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Fullscreen Loading Overlay (Shown during media import) -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/loadingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:indeterminate="true"
+                app:indicatorColor="@color/color_primary" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Importing Media..."
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

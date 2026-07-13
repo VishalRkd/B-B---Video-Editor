@@ -92,7 +92,9 @@ class TimelineLaneController(
         
         when (trackType) {
             TrackType.VIDEO -> {
-                card.setCardBackgroundColor(ContextCompat.getColor(context, R.color.color_surface_variant))
+                card.setCardBackgroundColor(ContextCompat.getColor(context, R.color.color_track_video_bg))
+                card.strokeColor = ContextCompat.getColor(context, R.color.color_track_video_border)
+                card.strokeWidth = 4
             }
             TrackType.AUDIO -> {
                 card.setCardBackgroundColor(ContextCompat.getColor(context, R.color.color_track_audio_bg))
@@ -107,6 +109,16 @@ class TimelineLaneController(
             TrackType.OVERLAY -> {
                 card.setCardBackgroundColor(ContextCompat.getColor(context, R.color.color_track_overlay_bg))
                 card.strokeColor = ContextCompat.getColor(context, R.color.color_track_overlay_accent)
+                card.strokeWidth = 2
+            }
+            TrackType.EFFECT -> {
+                card.setCardBackgroundColor(ContextCompat.getColor(context, R.color.color_track_effect_bg))
+                card.strokeColor = ContextCompat.getColor(context, R.color.color_track_effect_accent)
+                card.strokeWidth = 2
+            }
+            TrackType.ADJUSTMENT -> {
+                card.setCardBackgroundColor(ContextCompat.getColor(context, R.color.color_track_adjustment_bg))
+                card.strokeColor = ContextCompat.getColor(context, R.color.color_track_adjustment_accent)
                 card.strokeWidth = 2
             }
         }
@@ -159,6 +171,10 @@ class TimelineLaneController(
             borderView.visibility = if (isSelected) View.VISIBLE else View.GONE
             leftHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
             rightHandle.visibility = if (isSelected) View.VISIBLE else View.GONE
+
+            if (!isSelected) {
+                view.setOnTouchListener(null)
+            }
         }
 
         if (needsThumbnails) {
@@ -177,10 +193,21 @@ class TimelineLaneController(
                 filterBadge.visibility = View.GONE
             }
 
-            // For TEXT clips the name/duration are less relevant; the text preview
-            // (set in updateThumbnailStrip) carries the content. Keep name hidden.
+            // For TEXT, EFFECT, ADJUSTMENT, and OVERLAY mockups
             if (trackType == TrackType.TEXT) {
                 nameView.visibility = View.GONE
+            } else if (trackType == TrackType.EFFECT) {
+                nameView.text = "Glow"
+                nameView.visibility = View.VISIBLE
+            } else if (trackType == TrackType.ADJUSTMENT) {
+                nameView.text = "Color Grading"
+                nameView.visibility = View.VISIBLE
+            } else if (trackType == TrackType.AUDIO) {
+                nameView.text = "Adventure.mp3"
+                nameView.visibility = View.VISIBLE
+            } else if (trackType == TrackType.OVERLAY) {
+                nameView.text = "Mountains.png"
+                nameView.visibility = View.VISIBLE
             } else if (asset != null) {
                 nameView.text = asset.displayName.substringBeforeLast(".")
                 nameView.visibility = View.VISIBLE
@@ -247,13 +274,19 @@ class TimelineLaneController(
             return
         }
 
-        // Text clips: show a text preview badge instead of a filmstrip/waveform.
-        if (trackType == TrackType.TEXT) {
+        // Text, Effect, Adjustment clips: show a text preview badge instead of a filmstrip/waveform.
+        if (trackType == TrackType.TEXT || trackType == TrackType.EFFECT || trackType == TrackType.ADJUSTMENT) {
             stripContainer.removeAllViews()
             stripContainer.isVisible = false
             waveformView.visibility = View.GONE
             val textPreview = view.findViewById<TextView?>(R.id.textPreview)
-            textPreview?.text = clip.textStyle?.text ?: "Text"
+            
+            if (trackType == TrackType.TEXT) {
+                textPreview?.text = clip.textStyle?.text ?: "EXPLORE MORE"
+            } else {
+                textPreview?.text = ""
+            }
+            
             textPreview?.visibility = View.VISIBLE
             return
         }

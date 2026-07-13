@@ -14,6 +14,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.fragment.navArgs
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import coil.load
 import coil.request.videoFrameMillis
 import com.beatsandbeyond.video_editor.R
@@ -63,6 +65,30 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     private var isRenderingTracks = false
     private var lastRenderSignature: String? = null
     private var isGestureActive = false
+
+    private val pickVideoLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.VIDEO)
+        }
+    }
+
+    private val pickAudioLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.AUDIO)
+        }
+    }
+
+    private val pickOverlayLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importMedia(uri, com.beatsandbeyond.video_editor.core.domain.model.MediaType.IMAGE)
+        }
+    }
 
     override fun inflateBinding(
         inflater: LayoutInflater,
@@ -202,7 +228,10 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     }
 
     private fun setupPlayPauseButton() {
-        binding.btnPlayPause.setOnClickListener {
+        binding.btnPlayPauseCenter.setOnClickListener {
+            viewModel.togglePlayPause()
+        }
+        binding.btnPlayLeft.setOnClickListener {
             viewModel.togglePlayPause()
         }
         binding.btnOverlayPlay.setOnClickListener {
@@ -216,29 +245,69 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         binding.labelVideo.trackTitle.text = getString(R.string.filter_videos)
         binding.labelVideo.btnMute.visibility = View.GONE
         binding.labelVideo.btnLock.visibility = View.GONE
+        binding.labelVideo.btnPlus.setOnClickListener {
+            pickVideoLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+        }
 
         binding.labelAudio.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_audio_bg))
         binding.labelAudio.trackIcon.setImageResource(R.drawable.ic_track_audio)
         binding.labelAudio.trackTitle.text = "Audio"
         binding.labelAudio.btnMute.visibility = View.GONE
         binding.labelAudio.btnLock.visibility = View.GONE
+        binding.labelAudio.btnPlus.setOnClickListener {
+            pickAudioLauncher.launch("audio/*")
+        }
 
         binding.labelText.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_text_bg))
         binding.labelText.trackIcon.setImageResource(R.drawable.ic_track_text)
         binding.labelText.trackTitle.text = "Text"
         binding.labelText.btnMute.visibility = View.GONE
         binding.labelText.btnLock.visibility = View.GONE
+        binding.labelText.btnPlus.setOnClickListener {
+            viewModel.addDefaultTextAtPlayhead()
+        }
 
         binding.labelOverlay.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_overlay_bg))
         binding.labelOverlay.trackIcon.setImageResource(R.drawable.ic_track_overlay)
         binding.labelOverlay.trackTitle.text = "Overlay"
         binding.labelOverlay.btnMute.visibility = View.GONE
         binding.labelOverlay.btnLock.visibility = View.GONE
+        binding.labelOverlay.btnPlus.setOnClickListener {
+            pickOverlayLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+        }
+
+        binding.labelEffect.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_effect_bg))
+        binding.labelEffect.trackIcon.setImageResource(R.drawable.ic_filter)
+        binding.labelEffect.trackTitle.text = "Effect"
+        binding.labelEffect.btnMute.visibility = View.GONE
+        binding.labelEffect.btnLock.visibility = View.GONE
+        binding.labelEffect.btnPlus.setOnClickListener {
+            viewModel.addDefaultEffectAtPlayhead()
+        }
+
+        binding.labelAdjustment.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_adjustment_bg))
+        binding.labelAdjustment.trackIcon.setImageResource(R.drawable.ic_adjust)
+        binding.labelAdjustment.trackTitle.text = "Adjust"
+        binding.labelAdjustment.btnMute.visibility = View.GONE
+        binding.labelAdjustment.btnLock.visibility = View.GONE
+        binding.labelAdjustment.btnPlus.setOnClickListener {
+            viewModel.addDefaultAdjustmentAtPlayhead()
+        }
     }
 
     private fun setupContextToolbarActions() {
-        binding.contextToolbar.btnSplit.setOnClickListener {
-            viewModel.splitAtPlayhead()
+        binding.contextToolbar.btnSplit.setOnClickListener { view ->
+            val popup = android.widget.PopupMenu(requireContext(), view)
+            popup.menuInflater.inflate(R.menu.menu_split_options, popup.menu)
+            popup.setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_split -> viewModel.splitAtPlayhead()
+                    R.id.action_trim_left -> viewModel.trimLeftToPlayhead()
+                    R.id.action_trim_right -> viewModel.trimRightToPlayhead()
+                }
+                true
+            }
+            popup.show()
         }
         binding.contextToolbar.btnSpeed.setOnClickListener { view ->
             showSpeedPickerMenu(view)
@@ -261,61 +330,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     }
 
     private fun setupFrameControls() {
-        // Seek frame-by-frame (+/- 33ms for 30fps simulation)
-        binding.btnFrameNext.setOnClickListener {
-            val state = viewModel.uiState.value
-            if (state is ProjectDetailUiState.Content) {
-                viewModel.seekTo((state.currentPositionMs + 33L).coerceAtMost(state.totalDurationMs))
-            }
-        }
-        binding.btnFramePrev.setOnClickListener {
-            val state = viewModel.uiState.value
-            if (state is ProjectDetailUiState.Content) {
-                viewModel.seekTo((state.currentPositionMs - 33L).coerceAtLeast(0L))
-            }
-        }
-        binding.btnSkipPrev.setOnClickListener {
-            viewModel.seekTo(0L)
-        }
-        binding.btnSkipNext.setOnClickListener {
-            val state = viewModel.uiState.value
-            if (state is ProjectDetailUiState.Content) {
-                viewModel.seekTo(state.totalDurationMs)
-            }
-        }
-        binding.btnMagnet.setOnClickListener {
-            isMagnetEnabled = !isMagnetEnabled
-            binding.btnMagnet.alpha = if (isMagnetEnabled) 1.0f else 0.4f
-            binding.btnMagnet.setColorFilter(
-                if (isMagnetEnabled) resources.getColor(R.color.color_primary, null)
-                else resources.getColor(R.color.white, null)
-            )
-            Toast.makeText(
-                context,
-                if (isMagnetEnabled) getString(R.string.toast_magnet_on) else getString(R.string.toast_magnet_off),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-        binding.btnKeyframe.setOnClickListener {
-            // Zoom in / out toggle (reuse keyframe icon as zoom control)
-            zoomTimeline(if (pixelsPerMs < maxPixelsPerMs) 1.5f else 1.0f / 1.5f)
-        }
-        binding.btnExpand.setOnClickListener {
-            // Toggle ripple trim mode
-            isRippleEnabled = !isRippleEnabled
-            binding.btnExpand.alpha = if (isRippleEnabled) 1.0f else 0.4f
-            binding.btnExpand.setColorFilter(
-                if (isRippleEnabled) resources.getColor(R.color.color_primary, null)
-                else resources.getColor(R.color.white, null)
-            )
-            Toast.makeText(
-                context,
-                if (isRippleEnabled) getString(R.string.toast_ripple_on) else getString(R.string.toast_ripple_off),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-        binding.btnMidAdd.setOnClickListener { view ->
-            showAddMediaMenu(view)
+        // Setup top menu item actions
+        binding.btnMore.setOnClickListener {
+            Toast.makeText(context, getString(R.string.toast_more_options), Toast.LENGTH_SHORT).show()
         }
         binding.btnOverlayGrid.setOnClickListener {
             Toast.makeText(context, getString(R.string.toast_grid_options), Toast.LENGTH_SHORT).show()
@@ -332,22 +349,12 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     }
 
     private fun showSpeedPickerMenu(view: View) {
-        val popup = PopupMenu(requireContext(), view)
-        popup.menuInflater.inflate(R.menu.menu_speed_options, popup.menu)
-        popup.setOnMenuItemClickListener { item ->
-            val speed = when (item.itemId) {
-                R.id.speed_0_25 -> 0.25f
-                R.id.speed_0_5 -> 0.5f
-                R.id.speed_1 -> 1.0f
-                R.id.speed_1_5 -> 1.5f
-                R.id.speed_2 -> 2.0f
-                R.id.speed_4 -> 4.0f
-                else -> 1.0f
-            }
+        val clip = viewModel.getSelectedClip() ?: return
+        val sheet = com.beatsandbeyond.video_editor.feature.projectdetail.bottomsheet.SpeedBottomSheet.newInstance(clip.speedFactor)
+        sheet.onSpeedSelected = { speed ->
             viewModel.changeSelectedClipSpeed(speed)
-            true
         }
-        popup.show()
+        sheet.show(childFragmentManager, com.beatsandbeyond.video_editor.feature.projectdetail.bottomsheet.SpeedBottomSheet::class.java.simpleName)
     }
 
     private fun showDeleteClipConfirmation() {
@@ -365,24 +372,11 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
 
     private fun showVolumeDialog() {
         val clip = viewModel.getSelectedClip() ?: return
-        var volume = clip.volume
-
-        val slider = com.google.android.material.slider.Slider(requireContext()).apply {
-            valueFrom = 0f
-            valueTo = 2f
-            stepSize = 0.05f
-            value = volume
-            setLabelFormatter { "%.0f%%".format(it * 100) }
+        val sheet = com.beatsandbeyond.video_editor.feature.projectdetail.bottomsheet.AudioOptionsBottomSheet.newInstance(clip.volume)
+        sheet.onVolumeSelected = { volume ->
+            viewModel.setSelectedClipVolume(volume)
         }
-
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.dialog_volume_title)
-            .setView(slider)
-            .setPositiveButton(R.string.btn_apply) { _, _ ->
-                viewModel.setSelectedClipVolume(slider.value)
-            }
-            .setNegativeButton(R.string.btn_cancel, null)
-            .show()
+        sheet.show(childFragmentManager, com.beatsandbeyond.video_editor.feature.projectdetail.bottomsheet.AudioOptionsBottomSheet::class.java.simpleName)
     }
 
     // ── Add-media menu (audio / text / overlay) ─────────────────────────────
@@ -651,6 +645,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         binding.bottomBar.visibility = View.VISIBLE
         binding.errorMessage.visibility = View.GONE
 
+        // Loading Overlay visibility during media import
+        binding.loadingOverlay.visibility = if (state.isImporting) View.VISIBLE else View.GONE
+
         // Undo/Redo button enablement
         binding.btnUndo.isEnabled = state.canUndo
         binding.btnUndo.alpha = if (state.canUndo) 1.0f else 0.4f
@@ -659,7 +656,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
 
         // Play/Pause icon
         val playPauseIcon = if (state.isPlaying) R.drawable.ic_pause else R.drawable.ic_play
-        binding.btnPlayPause.setIconResource(playPauseIcon)
+        binding.btnPlayPauseCenter.setImageResource(playPauseIcon)
+        binding.btnPlayLeft.setImageResource(playPauseIcon)
         binding.btnOverlayPlay.setImageResource(playPauseIcon)
 
         // Buffering Indicator
@@ -668,6 +666,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
 
         // Update timecode text badge
         binding.txtOverlayTimecode.text = "${formatTime(state.currentPositionMs)} / ${formatTime(state.totalDurationMs)}"
+        binding.txtTimecodeCurrent.text = "${formatTime(state.currentPositionMs)} "
+        binding.txtTimecodeTotal.text = "/ ${formatTime(state.totalDurationMs)}"
 
         // Sync scroll + playhead from playback position (only when the user isn't scrubbing).
         // Done on every position tick — playing OR paused — so seeking while paused also
@@ -718,6 +718,8 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                         com.beatsandbeyond.video_editor.core.domain.model.TrackType.AUDIO -> binding.audioTrackLane
                         com.beatsandbeyond.video_editor.core.domain.model.TrackType.TEXT -> binding.textTrackLane
                         com.beatsandbeyond.video_editor.core.domain.model.TrackType.OVERLAY -> binding.overlayTrackLane
+                        com.beatsandbeyond.video_editor.core.domain.model.TrackType.EFFECT -> binding.effectTrackLane
+                        com.beatsandbeyond.video_editor.core.domain.model.TrackType.ADJUSTMENT -> binding.adjustmentTrackLane
                     }
                     TimelineLaneController(
                         lane = lane,
@@ -738,7 +740,7 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
             rebindSelectedClipGestures(state)
 
             // Context Toolbar toggle
-            binding.contextToolbar.root.visibility = if (state.selectedClipId != null) View.VISIBLE else View.GONE
+            binding.contextToolbar.root.visibility = if (state.selectedClipId != null) View.VISIBLE else View.INVISIBLE
         } finally {
             isRenderingTracks = false
         }

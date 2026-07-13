@@ -1,5 +1,7 @@
 package com.beatsandbeyond.video_editor.feature.projectdetail
 
+import android.content.Context
+import android.net.Uri
 import android.view.Surface
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -9,20 +11,27 @@ import com.beatsandbeyond.video_editor.core.domain.engine.AudioEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.ExportEngine
 import com.beatsandbeyond.video_editor.core.domain.engine.PreviewEngine
 import com.beatsandbeyond.video_editor.core.domain.model.*
+import com.beatsandbeyond.video_editor.core.domain.repository.AssetRepository
 import com.beatsandbeyond.video_editor.core.domain.usecase.asset.GetAssetsByProjectIdUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.audio.AddAudioTrackUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.audio.SetClipVolumeUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddOverlayClipUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddTextClipUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.effects.ApplyFilterUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddEffectClipUseCase
+import com.beatsandbeyond.video_editor.core.domain.usecase.effects.AddAdjustmentClipUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.GetProjectByIdUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.project.UpdateProjectUseCase
 import com.beatsandbeyond.video_editor.core.domain.usecase.timeline.*
+import com.beatsandbeyond.video_editor.core.utils.CoroutineDispatchers
+import com.beatsandbeyond.video_editor.core.utils.Logger
 import com.beatsandbeyond.video_editor.feature.projectdetail.model.ProjectDetailUiState
 import com.beatsandbeyond.video_editor.ui.base.BaseViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.BufferOverflow
 import java.util.UUID
 import javax.inject.Inject
@@ -57,6 +66,12 @@ class ProjectDetailViewModel @Inject constructor(
     private val applyFilterUseCase: ApplyFilterUseCase,
     private val audioEngine: AudioEngine,
     private val exportEngine: ExportEngine,
+    @ApplicationContext private val context: Context,
+    private val assetRepository: AssetRepository,
+    private val addVideoClipUseCase: AddVideoClipUseCase,
+    private val addEffectClipUseCase: AddEffectClipUseCase,
+    private val addAdjustmentClipUseCase: AddAdjustmentClipUseCase,
+    private val dispatchers: CoroutineDispatchers,
 ) : BaseViewModel() {
 
     private val _waveforms = MutableStateFlow<Map<String, FloatArray>>(emptyMap())
@@ -109,24 +124,22 @@ class ProjectDetailViewModel @Inject constructor(
 
             // If empty, initialize timeline from assets for compatibility
             if (project.timeline.isEmpty && assets.isNotEmpty()) {
-                val primaryTrack = Track(
-                    id = UUID.randomUUID().toString(),
-                    type = TrackType.VIDEO,
-                    clips = assets.mapIndexed { index, asset ->
-                        Clip(
-                            id = UUID.randomUUID().toString(),
-                            assetId = asset.id,
-                            timelinePositionMs = assets.take(index).sumOf { it.durationMs },
-                            trimStartMs = 0L,
-                            trimEndMs = asset.durationMs,
+                val updatedTracks = project.timeline.tracks.map { track ->
+                    if (track.type == TrackType.VIDEO && track.clips.isEmpty()) {
+                        track.copy(
+                            clips = assets.mapIndexed { index, asset ->
+                                Clip(
+                                    id = UUID.randomUUID().toString(),
+                                    assetId = asset.id,
+                                    timelinePositionMs = assets.take(index).sumOf { it.durationMs },
+                                    trimStartMs = 0L,
+                                    trimEndMs = asset.durationMs,
+                                )
+                            }
                         )
-                    }
-                )
-                val newTimeline = Timeline(
-                    id = UUID.randomUUID().toString(),
-                    tracks = listOf(primaryTrack),
-                )
-                project = project.copy(timeline = newTimeline)
+                    } else track
+                }
+                project = project.copy(timeline = project.timeline.copy(tracks = updatedTracks))
                 updateProjectUseCase(project)
             }
 
@@ -310,6 +323,44 @@ class ProjectDetailViewModel @Inject constructor(
             is AppResult.Loading -> {
                 // Not emitted
             }
+        }
+    }
+
+    fun trimLeftToPlayhead() {
+        val content = currentContent ?: return
+        val clipId = content.selectedClipId ?: return
+        val project = currentProject ?: return
+        val positionMs = content.currentPositionMs
+
+        val clip = project.timeline.findClip(clipId) ?: return
+        if (positionMs <= clip.timelinePositionMs || positionMs >= clip.timelineEndMs) return
+
+        val offsetOnTimelineMs = positionMs - clip.timelinePositionMs
+        val offsetInSourceMs = (offsetOnTimelineMs * clip.speedFactor).toLong()
+        val newTrimStartMs = clip.trimStartMs + offsetInSourceMs
+
+        when (val result = rippleTrimUseCase(project, clipId, newTrimStartMs, clip.trimEndMs)) {
+            is AppResult.Success -> applyEdit(result.data)
+            else -> {}
+        }
+    }
+
+    fun trimRightToPlayhead() {
+        val content = currentContent ?: return
+        val clipId = content.selectedClipId ?: return
+        val project = currentProject ?: return
+        val positionMs = content.currentPositionMs
+
+        val clip = project.timeline.findClip(clipId) ?: return
+        if (positionMs <= clip.timelinePositionMs || positionMs >= clip.timelineEndMs) return
+
+        val offsetOnTimelineMs = positionMs - clip.timelinePositionMs
+        val offsetInSourceMs = (offsetOnTimelineMs * clip.speedFactor).toLong()
+        val newTrimEndMs = clip.trimStartMs + offsetInSourceMs
+
+        when (val result = trimClipUseCase(project, clipId, clip.trimStartMs, newTrimEndMs)) {
+            is AppResult.Success -> applyEdit(result.data)
+            else -> {}
         }
     }
 
@@ -541,6 +592,7 @@ class ProjectDetailViewModel @Inject constructor(
             if (state is ProjectDetailUiState.Content) {
                 state.copy(
                     project = project,
+                    assets = assetsMap,
                     totalDurationMs = project.durationMs,
                     selectedClipId = selectedClipId,
                     selectedClipIds = if (selectedClipId != null) setOf(selectedClipId) else state.selectedClipIds,
@@ -588,6 +640,190 @@ class ProjectDetailViewModel @Inject constructor(
                         state.copy(currentPositionMs = positionMs)
                     } else state
                 }
+            }
+        }
+    }
+
+    fun importMedia(uri: Uri, mediaType: MediaType) {
+        val content = currentContent ?: return
+        val project = currentProject ?: return
+        val playheadPosition = content.currentPositionMs
+
+        launchSafely {
+            _uiState.update { state ->
+                if (state is ProjectDetailUiState.Content) {
+                    state.copy(isImporting = true)
+                } else state
+            }
+
+            try {
+                val asset = createAssetFromUri(uri, mediaType)
+                if (asset != null) {
+                    val importResult = assetRepository.importAssets(listOf(asset), project.id)
+                    if (importResult is AppResult.Success) {
+                        val importedAsset = importResult.data.first()
+                        assetsMap = assetsMap + (importedAsset.id to importedAsset)
+                        
+                        val beforeIds = project.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+                        val editResult = when (mediaType) {
+                            MediaType.VIDEO -> addVideoClipUseCase(project, importedAsset, playheadPosition)
+                            MediaType.AUDIO -> addAudioTrackUseCase(project, importedAsset, playheadPosition)
+                            MediaType.IMAGE -> addOverlayClipUseCase(project, importedAsset, playheadPosition)
+                        }
+
+                        when (editResult) {
+                            is AppResult.Success -> {
+                                val updatedProject = editResult.data
+                                val afterIds = updatedProject.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+                                val newClipId = (afterIds - beforeIds).firstOrNull()
+                                
+                                applyEdit(updatedProject)
+                                if (newClipId != null) {
+                                    selectClip(newClipId)
+                                }
+                            }
+                            is AppResult.Error -> {
+                                Logger.e("ProjectDetailViewModel", "Failed to apply edit for imported media: ${editResult.message}")
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.e("ProjectDetailViewModel", "Failed to import media", e)
+            } finally {
+                _uiState.update { state ->
+                    if (state is ProjectDetailUiState.Content) {
+                        state.copy(isImporting = false)
+                    } else state
+                }
+            }
+        }
+    }
+
+    private suspend fun createAssetFromUri(uri: Uri, mediaType: MediaType): Asset? = withContext(dispatchers.io) {
+        val retriever = android.media.MediaMetadataRetriever()
+        var durationMs = 0L
+        var width = 0
+        var height = 0
+        var displayName = "Imported_${System.currentTimeMillis()}"
+        var sizeBytes = 0L
+
+        try {
+            retriever.setDataSource(context, uri)
+            
+            val durationStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+            durationMs = durationStr?.toLongOrNull() ?: 0L
+
+            val wStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            val hStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            width = wStr?.toIntOrNull() ?: 0
+            height = hStr?.toIntOrNull() ?: 0
+        } catch (e: Exception) {
+            Logger.e("ProjectDetailViewModel", "Failed to retrieve media metadata", e)
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {}
+        }
+
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1) {
+                        displayName = cursor.getString(nameIndex) ?: displayName
+                    }
+                    val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (sizeIndex != -1) {
+                        sizeBytes = cursor.getLong(sizeIndex)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Logger.e("ProjectDetailViewModel", "Failed to query ContentResolver for metadata", e)
+        }
+
+        if (mediaType == MediaType.IMAGE) {
+            durationMs = 0L
+        }
+
+        Asset(
+            id = UUID.randomUUID().toString(),
+            mediaUri = uri.toString(),
+            mediaType = mediaType,
+            displayName = displayName,
+            durationMs = durationMs,
+            width = width,
+            height = height,
+            sizeBytes = sizeBytes,
+            importedAt = System.currentTimeMillis()
+        )
+    }
+
+    fun addDefaultTextAtPlayhead() {
+        val content = currentContent ?: return
+        val project = currentProject ?: return
+        val playheadPosition = content.currentPositionMs
+        val defaultStyle = TextStyle(text = "Default Text")
+        
+        launchSafely {
+            val beforeIds = project.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+            when (val result = addTextClipUseCase(project, defaultStyle, playheadPosition)) {
+                is AppResult.Success -> {
+                    val updatedProject = result.data
+                    val afterIds = updatedProject.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+                    val newClipId = (afterIds - beforeIds).firstOrNull()
+                    applyEdit(updatedProject)
+                    if (newClipId != null) {
+                        selectClip(newClipId)
+                    }
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    fun addDefaultEffectAtPlayhead() {
+        val content = currentContent ?: return
+        val project = currentProject ?: return
+        val playheadPosition = content.currentPositionMs
+        
+        launchSafely {
+            val beforeIds = project.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+            when (val result = addEffectClipUseCase(project, playheadPosition)) {
+                is AppResult.Success -> {
+                    val updatedProject = result.data
+                    val afterIds = updatedProject.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+                    val newClipId = (afterIds - beforeIds).firstOrNull()
+                    applyEdit(updatedProject)
+                    if (newClipId != null) {
+                        selectClip(newClipId)
+                    }
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    fun addDefaultAdjustmentAtPlayhead() {
+        val content = currentContent ?: return
+        val project = currentProject ?: return
+        val playheadPosition = content.currentPositionMs
+        
+        launchSafely {
+            val beforeIds = project.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+            when (val result = addAdjustmentClipUseCase(project, playheadPosition)) {
+                is AppResult.Success -> {
+                    val updatedProject = result.data
+                    val afterIds = updatedProject.timeline.tracks.flatMap { it.clips }.map { it.id }.toSet()
+                    val newClipId = (afterIds - beforeIds).firstOrNull()
+                    applyEdit(updatedProject)
+                    if (newClipId != null) {
+                        selectClip(newClipId)
+                    }
+                }
+                else -> Unit
             }
         }
     }

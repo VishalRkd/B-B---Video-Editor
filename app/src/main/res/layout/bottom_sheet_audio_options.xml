@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/color_surface"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:background="@color/color_outline" />
+
+    <!-- Title and Actions -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:text="Audio Options"
+            android:textColor="@color/color_on_surface"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/btnApply"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_alignParentEnd="true"
+            android:layout_centerVertical="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Apply"
+            android:src="@drawable/ic_check"
+            app:tint="@color/color_primary" />
+    </RelativeLayout>
+
+    <!-- Volume -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_volume"
+                app:tint="@color/color_outline" />
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="Volume"
+                android:textColor="@color/color_on_surface"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/txtVolumeValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="100%"
+                android:textColor="@color/color_primary"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/sliderVolume"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:value="1.0"
+            android:valueFrom="0.0"
+            android:valueTo="10.0"
+            app:haloColor="@color/color_primary_transparent"
+            app:thumbColor="@color/color_primary"
+            app:trackColorActive="@color/color_primary"
+            app:trackColorInactive="@color/color_outline_variant" />
+    </LinearLayout>
+
+    <!-- Fade In -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Fade In"
+                android:textColor="@color/color_on_surface" />
+            <TextView
+                android:id="@+id/txtFadeInValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0.0s"
+                android:textColor="@color/color_outline" />
+        </LinearLayout>
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/sliderFadeIn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:value="0.0"
+            android:valueFrom="0.0"
+            android:valueTo="10.0"
+            app:thumbColor="@color/color_on_surface"
+            app:trackColorActive="@color/color_on_surface"
+            app:trackColorInactive="@color/color_outline_variant" />
+    </LinearLayout>
+
+    <!-- Fade Out -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginBottom="32dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Fade Out"
+                android:textColor="@color/color_on_surface" />
+            <TextView
+                android:id="@+id/txtFadeOutValue"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0.0s"
+                android:textColor="@color/color_outline" />
+        </LinearLayout>
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/sliderFadeOut"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:value="0.0"
+            android:valueFrom="0.0"
+            android:valueTo="10.0"
+            app:thumbColor="@color/color_on_surface"
+            app:trackColorActive="@color/color_on_surface"
+            app:trackColorInactive="@color/color_outline_variant" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btnExtractAudio"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Extract Audio"
+        app:icon="@drawable/ic_track_audio"
+        app:iconGravity="textStart" />
+
+</LinearLayout>

@@ -48,10 +48,15 @@ class AddOverlayClipUseCase @Inject constructor() {
                 )
             )
         } else {
+            val newClips = overlayTrack.clips.map { c ->
+                if (c.timelinePositionMs >= timelinePositionMs.coerceAtLeast(0L)) {
+                    c.copy(timelinePositionMs = c.timelinePositionMs + clipDuration)
+                } else c
+            } + clip
             timeline.copy(
                 tracks = timeline.tracks.map { track ->
                     if (track.id == overlayTrack.id) {
-                        track.copy(clips = (track.clips + clip).sortedBy { it.timelinePositionMs })
+                        track.copy(clips = newClips.sortedBy { it.timelinePositionMs })
                     } else track
                 }
             )

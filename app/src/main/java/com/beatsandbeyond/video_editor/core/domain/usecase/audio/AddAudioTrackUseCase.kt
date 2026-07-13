@@ -18,7 +18,11 @@ import javax.inject.Inject
  * layers stack sequentially rather than overlapping.
  */
 class AddAudioTrackUseCase @Inject constructor() {
-    operator fun invoke(project: Project, asset: Asset): AppResult<Project> {
+    operator fun invoke(
+        project: Project,
+        asset: Asset,
+        timelinePositionMs: Long = 0L
+    ): AppResult<Project> {
         if (asset.durationMs <= 0L) {
             return AppResult.Error(IllegalArgumentException("Asset has no duration"))
         }
@@ -29,7 +33,7 @@ class AddAudioTrackUseCase @Inject constructor() {
         val clip = Clip(
             id = UUID.randomUUID().toString(),
             assetId = asset.id,
-            timelinePositionMs = audioTrack?.durationMs ?: 0L,
+            timelinePositionMs = timelinePositionMs.coerceAtLeast(0L),
             trimStartMs = 0L,
             trimEndMs = asset.durationMs,
         )
@@ -43,10 +47,42 @@ class AddAudioTrackUseCase @Inject constructor() {
                 )
             )
         } else {
+            val newClipsList = mutableListOf<Clip>()
+            for (c in audioTrack.clips) {
+                val clipStart = c.timelinePositionMs
+                val clipEnd = c.timelinePositionMs + c.durationOnTimelineMs
+
+                if (clipStart >= timelinePositionMs) {
+                    newClipsList.add(
+                        c.copy(timelinePositionMs = clipStart + asset.durationMs)
+                    )
+                } else if (clipStart < timelinePositionMs && clipEnd > timelinePositionMs) {
+                    val leftDuration = timelinePositionMs - clipStart
+                    val speed = c.speedFactor
+
+                    newClipsList.add(
+                        c.copy(
+                            trimEndMs = c.trimStartMs + (leftDuration * speed).toLong()
+                        )
+                    )
+                    newClipsList.add(
+                        c.copy(
+                            id = UUID.randomUUID().toString(),
+                            timelinePositionMs = timelinePositionMs + asset.durationMs,
+                            trimStartMs = c.trimStartMs + (leftDuration * speed).toLong(),
+                            trimEndMs = c.trimEndMs
+                        )
+                    )
+                } else {
+                    newClipsList.add(c)
+                }
+            }
+            newClipsList.add(clip)
+            newClipsList.sortBy { it.timelinePositionMs }
             timeline.copy(
                 tracks = timeline.tracks.map { track ->
                     if (track.id == audioTrack.id) {
-                        track.copy(clips = track.clips + clip)
+                        track.copy(clips = newClipsList)
                     } else track
                 }
             )
