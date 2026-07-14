@@ -18,7 +18,7 @@ data class EditingHistory(
      * Records [newState] as the current state, adding [current] to the past stack.
      * Clears the redo (future) stack.
      */
-    fun push(current: Project, newState: Project): EditingHistory = copy(
+    fun push(current: Project): EditingHistory = copy(
         past = (past + current).takeLast(maxSize),
         future = emptyList(),
     )

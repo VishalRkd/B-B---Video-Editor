@@ -22,7 +22,7 @@ class SetSpeedUseCaseTest {
 
     @Before
     fun setUp() {
-        useCase = SetSpeedUseCase()
+        useCase = SetSpeedUseCase(com.beatsandbeyond.video_editor.core.data.engine.KotlinTimelineEngine())
 
         val clip = Clip(
             id = clipId,

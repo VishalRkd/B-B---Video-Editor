@@ -253,3 +253,25 @@ This file records significant architectural decisions, the alternatives consider
 - WorkManager is the recommended Jetpack library for persistent work. It guarantees execution even if the app process is killed or the device restarts.
 - By promoting the `ExportWorker` to a foreground service via `setForeground()`, it gets high-priority execution, survives backgrounding, and provides user progress updates via system notifications.
 - Observable `WorkInfo` flows simplify tracking progress and handling cancellation directly from the ViewModel.
+
+---
+
+## ADR-015: Preview Composition Strategy
+
+**Date**: Phase 3  
+**Status**: Active
+
+**Decision**: Implement a hybrid composition rendering strategy for player preview:
+1. **Primary Video/Audio Tracks**: Rendered via Media3 ExoPlayer concatenating media sources.
+2. **Visual Filters**: Rendered dynamically via a lightweight Android View overlay (`filterPreviewOverlay`) in the layout container on top of the player.
+3. **Text, Overlays, and Adjustments**: Since dynamic real-time OpenGL overlay rendering on the player is highly complex and resource-heavy, rendering of Text, Image Overlays, and Adjustment track clips in the preview player is deferred. These features are fully rendered/composited on the final MP4 output during background video export using the OpenGL `GLFilterRenderer` and `MediaCodecExportEngine`.
+4. **UI Gating**: Explicitly disable or grey out the UI plus/add buttons for Text, Overlay, Effect, and Adjustment tracks in this phase, showing a "coming soon" Toast.
+
+**Alternatives Considered**:
+- Real-time OpenGL composition on the preview surface (dismissed due to high implementation complexity and performance cost).
+- Media3 Composition API (dismissed due to limited/unstable support for dynamic timeline changes like speed scaling and trim modifications).
+
+**Rationale**:
+- Ensures smooth 60fps video preview and scrub performance.
+- Avoids premature rendering pipeline complexity.
+- Keeps feature layer ViewModel fully decoupled.

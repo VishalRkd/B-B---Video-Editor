@@ -55,12 +55,16 @@ class SplitClipUseCaseTest {
         val result = useCase(project, clipId, 4000L)
 
         assertTrue(result is AppResult.Success)
-        val updatedProject = (result as AppResult.Success).data
+        val splitResult = (result as AppResult.Success).data
+        val updatedProject = splitResult.project
         val clips = updatedProject.timeline.tracks.first().clips
         assertEquals(2, clips.size)
 
         val left = clips[0]
         val right = clips[1]
+
+        assertEquals(splitResult.leftClipId, left.id)
+        assertEquals(splitResult.rightClipId, right.id)
 
         assertEquals(0L, left.timelinePositionMs)
         assertEquals(0L, left.trimStartMs)

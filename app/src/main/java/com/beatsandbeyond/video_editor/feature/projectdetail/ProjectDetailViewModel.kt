@@ -35,9 +35,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.BufferOverflow
 import java.util.UUID
-import javax.inject.Inject
-import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.ExistingWorkPolicy
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import javax.inject.Inject
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -98,6 +100,8 @@ class ProjectDetailViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow<ProjectDetailUiState>(ProjectDetailUiState.Loading)
     val uiState: StateFlow<ProjectDetailUiState> = _uiState.asStateFlow()
+
+    private val saveMutex = Mutex()
 
     private var editingHistory = EditingHistory()
     private var currentProject: Project? = null
@@ -287,7 +291,7 @@ class ProjectDetailViewModel @Inject constructor(
                     preEditProject = null
 
                     launchSafely {
-                        editingHistory = editingHistory.push(baseline, updatedProject)
+                        editingHistory = editingHistory.push(baseline)
                         updateProjectUseCase(updatedProject) // auto-save to Room
                         currentProject = updatedProject
                         refreshContent(updatedProject, content.selectedClipId)
@@ -330,8 +334,8 @@ class ProjectDetailViewModel @Inject constructor(
 
         when (val result = splitClipUseCase(project, clipId, positionMs)) {
             is AppResult.Success -> {
-                applyEdit(result.data)
-                selectClip(null) // Clear selection after splitting
+                val splitResult = result.data
+                applyEdit(splitResult.project, selectedClipId = splitResult.rightClipId)
             }
             is AppResult.Error -> {
                 // Splitting might fail if playhead is out of bounds of the selected clip
@@ -387,8 +391,7 @@ class ProjectDetailViewModel @Inject constructor(
 
         when (val result = deleteClipUseCase(project, clipId)) {
             is AppResult.Success -> {
-                applyEdit(result.data)
-                selectClip(null)
+                applyEdit(result.data, selectedClipId = null)
             }
             is AppResult.Error -> {
                 // Delete failed
@@ -409,7 +412,7 @@ class ProjectDetailViewModel @Inject constructor(
                 if (isFinal) {
                     val baseline = preEditProject ?: project
                     preEditProject = null
-                    editingHistory = editingHistory.push(baseline, result.data)
+                    editingHistory = editingHistory.push(baseline)
                     currentProject = result.data
                     saveAndRefreshUi(result.data)
                 } else {
@@ -625,7 +628,7 @@ class ProjectDetailViewModel @Inject constructor(
                 if (isFinal) {
                     val baseline = preEditProject ?: project
                     preEditProject = null
-                    editingHistory = editingHistory.push(baseline, result.data)
+                    editingHistory = editingHistory.push(baseline)
                     currentProject = result.data
                     saveAndRefreshUi(result.data)
                 } else {
@@ -663,17 +666,19 @@ class ProjectDetailViewModel @Inject constructor(
 
     // ── Private helpers ─────────────────────────────────────────────────────
 
-    private fun applyEdit(newProject: Project) {
+    private fun applyEdit(newProject: Project, selectedClipId: String? = currentContent?.selectedClipId) {
         val old = currentProject ?: return
-        editingHistory = editingHistory.push(old, newProject)
+        editingHistory = editingHistory.push(old)
         currentProject = newProject
-        saveAndRefreshUi(newProject)
+        saveAndRefreshUi(newProject, selectedClipId)
     }
 
-    private fun saveAndRefreshUi(project: Project) {
+    private fun saveAndRefreshUi(project: Project, selectedClipId: String? = currentContent?.selectedClipId) {
         launchSafely {
-            updateProjectUseCase(project) // auto-save to Room
-            refreshContent(project, currentContent?.selectedClipId)
+            saveMutex.withLock {
+                updateProjectUseCase(project) // auto-save to Room
+            }
+            refreshContent(project, selectedClipId)
             previewEngine.loadTimeline(project.timeline)
         }
     }

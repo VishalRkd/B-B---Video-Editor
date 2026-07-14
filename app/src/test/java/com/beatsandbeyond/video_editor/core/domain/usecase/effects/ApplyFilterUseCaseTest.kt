@@ -23,7 +23,7 @@ class ApplyFilterUseCaseTest {
 
     @Before
     fun setUp() {
-        useCase = ApplyFilterUseCase()
+        useCase = ApplyFilterUseCase(com.beatsandbeyond.video_editor.core.data.engine.KotlinTimelineEngine())
         val clip = Clip(
             id = clipId, assetId = "asset_1", timelinePositionMs = 0L,
             trimStartMs = 0L, trimEndMs = 10000L,

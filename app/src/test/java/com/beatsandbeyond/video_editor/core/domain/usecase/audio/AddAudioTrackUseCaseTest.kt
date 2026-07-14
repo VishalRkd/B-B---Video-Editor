@@ -23,7 +23,7 @@ class AddAudioTrackUseCaseTest {
 
     @Before
     fun setUp() {
-        useCase = AddAudioTrackUseCase()
+        useCase = AddAudioTrackUseCase(com.beatsandbeyond.video_editor.core.data.engine.KotlinTimelineEngine())
         audioAsset = Asset(
             id = "audio_1",
             mediaUri = "content://audio/1",

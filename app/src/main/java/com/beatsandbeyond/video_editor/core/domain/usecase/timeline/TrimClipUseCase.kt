@@ -29,9 +29,10 @@ class TrimClipUseCase @Inject constructor(
             timelineEngine.trimClip(clip, newTrimStartMs, newTrimEndMs)
         } ?: return AppResult.Error(NoSuchElementException("Clip $clipId not found"))
 
-        return AppResult.Success(project.copy(
+        val updatedProject = project.copy(
             timeline = updatedTimeline,
             updatedAt = System.currentTimeMillis(),
-        ))
+        )
+        return com.beatsandbeyond.video_editor.core.domain.model.TimelineValidator.validateAndReturn(updatedProject)
     }
 }

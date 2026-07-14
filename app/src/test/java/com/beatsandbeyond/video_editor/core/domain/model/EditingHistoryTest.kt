@@ -33,14 +33,14 @@ class EditingHistoryTest {
 
     @Test
     fun `pushing state updates stacks`() {
-        val history = EditingHistory().push(project1, project2)
+        val history = EditingHistory().push(project1)
         assertTrue(history.canUndo)
         assertFalse(history.canRedo)
     }
 
     @Test
     fun `undo returns previous state`() {
-        val history = EditingHistory().push(project1, project2)
+        val history = EditingHistory().push(project1)
         val undoResult = history.undo(project2)
 
         assertTrue(undoResult != null)
@@ -52,7 +52,7 @@ class EditingHistoryTest {
 
     @Test
     fun `redo returns next state`() {
-        val history = EditingHistory().push(project1, project2)
+        val history = EditingHistory().push(project1)
         val undoResult = history.undo(project2)
         val (historyAfterUndo, revertedState) = undoResult!!
 
@@ -66,11 +66,11 @@ class EditingHistoryTest {
 
     @Test
     fun `pushing new state clears redo stack`() {
-        val history = EditingHistory().push(project1, project2)
+        val history = EditingHistory().push(project1)
         val (historyAfterUndo, revertedState) = history.undo(project2)!!
         
         // Pushing a new action after undo
-        val historyAfterPush = historyAfterUndo.push(revertedState, project3)
+        val historyAfterPush = historyAfterUndo.push(revertedState)
         assertTrue(historyAfterPush.canUndo)
         assertFalse(historyAfterPush.canRedo) // Redo stack cleared
     }
@@ -80,17 +80,16 @@ class EditingHistoryTest {
         var history = EditingHistory(maxSize = 2)
         
         // Push 3 states (retaining current state outside)
-        history = history.push(project1, project2)
-        history = history.push(project2, project3)
+        history = history.push(project1)
+        history = history.push(project2)
         
-        // Past stack has size 2 (retains project1 and project2, project3 is current)
+        // Past stack has size 2 (retains project1 and project2)
         assertEquals(2, history.past.size)
         assertEquals(project1, history.past[0])
         assertEquals(project2, history.past[1])
 
         // Add one more
-        val project4 = project3.copy(name = "P4")
-        history = history.push(project3, project4)
+        history = history.push(project3)
 
         // Oldest state (project1) should be dropped
         assertEquals(2, history.past.size)

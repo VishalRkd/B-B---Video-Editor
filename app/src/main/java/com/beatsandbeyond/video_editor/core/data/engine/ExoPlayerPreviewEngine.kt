@@ -60,6 +60,11 @@ class ExoPlayerPreviewEngine @Inject constructor(
     private var timelineClips: List<Clip> = emptyList()
     private var timelineAudioClips: List<Clip> = emptyList()
 
+    private var isVideoTrackMuted = false
+    private var videoTrackVolume = 1.0f
+    private var isAudioTrackMuted = false
+    private var audioTrackVolume = 1.0f
+
     private val _activeClipFilter = MutableStateFlow<com.beatsandbeyond.video_editor.core.domain.model.VideoFilter>(com.beatsandbeyond.video_editor.core.domain.model.VideoFilter.None)
     override val activeClipFilter: Flow<com.beatsandbeyond.video_editor.core.domain.model.VideoFilter> = _activeClipFilter.asStateFlow()
 
@@ -68,6 +73,13 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
     private val scope = CoroutineScope(dispatchers.main + SupervisorJob())
     private var positionUpdateJob: Job? = null
+    private var seekJob: Job? = null
+
+    private val audioPlayerListener = object : Player.Listener {
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            Logger.e(TAG, "ExoPlayer audio error: ${error.message}", error)
+        }
+    }
 
     // ── Player lifecycle ────────────────────────────────────────────────────
 
@@ -81,6 +93,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
     private fun ensureAudioPlayer(): ExoPlayer {
         return audioPlayer ?: ExoPlayer.Builder(context).build().also { exo ->
+            exo.addListener(audioPlayerListener)
             audioPlayer = exo
             Logger.d(TAG, "ExoPlayer audio instance created")
         }
@@ -100,6 +113,47 @@ class ExoPlayerPreviewEngine @Inject constructor(
         val primaryTrack = timeline.primaryVideoTrack
         val clips = primaryTrack?.clips ?: emptyList()
 
+        val audioTrack = timeline.tracks.firstOrNull { it.type == TrackType.AUDIO }
+        val audioClips = audioTrack?.clips ?: emptyList()
+
+        // 1. Check if the physical media source structure is identical
+        val videoStructureUnchanged = clips.size == timelineClips.size && clips.zip(timelineClips).all { (newClip, oldClip) ->
+            newClip.assetId == oldClip.assetId &&
+            newClip.trimStartMs == oldClip.trimStartMs &&
+            newClip.trimEndMs == oldClip.trimEndMs
+        }
+        val audioStructureUnchanged = audioClips.size == timelineAudioClips.size && audioClips.zip(timelineAudioClips).all { (newClip, oldClip) ->
+            newClip.assetId == oldClip.assetId &&
+            newClip.trimStartMs == oldClip.trimStartMs &&
+            newClip.trimEndMs == oldClip.trimEndMs &&
+            newClip.timelinePositionMs == oldClip.timelinePositionMs
+        }
+
+        if (videoStructureUnchanged && audioStructureUnchanged && timelineClips.isNotEmpty()) {
+            timelineClips = clips
+            timelineAudioClips = audioClips
+            
+            isVideoTrackMuted = primaryTrack?.isMuted ?: false
+            videoTrackVolume = primaryTrack?.volume ?: 1.0f
+            isAudioTrackMuted = audioTrack?.isMuted ?: false
+            audioTrackVolume = audioTrack?.volume ?: 1.0f
+
+            withContext(dispatchers.main) {
+                val exo = player
+                if (exo != null) {
+                    val currentIdx = exo.currentMediaItemIndex
+                    val currentClip = timelineClips.getOrNull(currentIdx)
+                    if (currentClip != null) {
+                        exo.setPlaybackSpeed(currentClip.speedFactor)
+                        updateVideoVolume(currentClip)
+                    }
+                }
+                updateAudioVolume(_currentPositionMs.value)
+            }
+            Logger.d(TAG, "Timeline parameters updated in-place (no source rebuild needed)")
+            return
+        }
+
         if (clips.isEmpty()) {
             Logger.w(TAG, "Timeline has no clips — nothing to preview")
             timelineClips = emptyList()
@@ -111,6 +165,12 @@ class ExoPlayerPreviewEngine @Inject constructor(
         }
 
         timelineClips = clips
+        timelineAudioClips = audioClips
+        
+        isVideoTrackMuted = primaryTrack?.isMuted ?: false
+        videoTrackVolume = primaryTrack?.volume ?: 1.0f
+        isAudioTrackMuted = audioTrack?.isMuted ?: false
+        audioTrackVolume = audioTrack?.volume ?: 1.0f
 
         val dataSourceFactory = DefaultDataSource.Factory(context)
         val videoConcatenatingSource = ConcatenatingMediaSource()
@@ -138,9 +198,7 @@ class ExoPlayerPreviewEngine @Inject constructor(
             videoConcatenatingSource.addMediaSource(clippedVideo)
         }
 
-        val audioTrack = timeline.tracks.firstOrNull { it.type == TrackType.AUDIO }
-        val audioClips = audioTrack?.clips ?: emptyList()
-        timelineAudioClips = audioClips
+
 
         val audioConcatenatingSource = ConcatenatingMediaSource()
         var currentAudioPosMs = 0L
@@ -261,13 +319,23 @@ class ExoPlayerPreviewEngine @Inject constructor(
     override suspend fun seekTo(positionMs: Long) {
         withContext(dispatchers.main) {
             val exo = ensurePlayer()
+            _currentPositionMs.value = positionMs
+            
             // If the player isn't ready yet, defer until STATE_READY (see onPlaybackStateChanged).
             if (exo.playbackState != Player.STATE_READY) {
                 pendingSeekMs = positionMs
-                _currentPositionMs.value = positionMs
                 return@withContext
             }
-            seekToInternal(positionMs)
+
+            seekJob?.cancel()
+            if (exo.isPlaying) {
+                seekToInternal(positionMs)
+            } else {
+                seekJob = scope.launch(dispatchers.main) {
+                    delay(16) // debounce rapid scrub seeks
+                    seekToInternal(positionMs)
+                }
+            }
         }
     }
 
@@ -312,6 +380,8 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
     override fun release() {
         stopPositionUpdates()
+        seekJob?.cancel()
+        seekJob = null
         pendingSeekMs = null
         player?.let { exo ->
             exo.release()
@@ -331,8 +401,9 @@ class ExoPlayerPreviewEngine @Inject constructor(
 
     private fun updateVideoVolume(clip: Clip) {
         val player = player ?: return
-        if (player.volume != clip.volume) {
-            player.volume = clip.volume
+        val targetVolume = if (isVideoTrackMuted) 0f else clip.volume * videoTrackVolume
+        if (player.volume != targetVolume) {
+            player.volume = targetVolume
         }
     }
 
@@ -341,7 +412,8 @@ class ExoPlayerPreviewEngine @Inject constructor(
         val activeAudioClip = timelineAudioClips.firstOrNull {
             positionMs >= it.timelinePositionMs && positionMs < it.timelineEndMs
         }
-        val targetVolume = activeAudioClip?.volume ?: 1.0f
+        val clipVolume = activeAudioClip?.volume ?: 1.0f
+        val targetVolume = if (isAudioTrackMuted) 0f else clipVolume * audioTrackVolume
         if (audioPlayer.volume != targetVolume) {
             audioPlayer.volume = targetVolume
         }
@@ -363,6 +435,18 @@ class ExoPlayerPreviewEngine @Inject constructor(
                         updateVideoVolume(currentClip)
                         updateAudioVolume(absolutePositionMs)
                         
+                        // AV Sync Alignment: Align audio player if it drifts from video timeline by > 120ms
+                        audioPlayer?.let { exoAudio ->
+                            if (exoAudio.isPlaying) {
+                                val audioPos = exoAudio.currentPosition
+                                val drift = Math.abs(absolutePositionMs - audioPos)
+                                if (drift > 120L) {
+                                    exoAudio.seekTo(absolutePositionMs)
+                                    Logger.w(TAG, "AV drift detected ($drift ms). Re-syncing audio player to $absolutePositionMs ms")
+                                }
+                            }
+                        }
+
                         if (_activeClipFilter.value != currentClip.filter) {
                             _activeClipFilter.value = currentClip.filter
                         }

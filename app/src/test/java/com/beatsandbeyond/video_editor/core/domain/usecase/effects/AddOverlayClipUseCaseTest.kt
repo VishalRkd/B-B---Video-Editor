@@ -22,7 +22,7 @@ class AddOverlayClipUseCaseTest {
 
     @Before
     fun setUp() {
-        useCase = AddOverlayClipUseCase()
+        useCase = AddOverlayClipUseCase(com.beatsandbeyond.video_editor.core.data.engine.KotlinTimelineEngine())
         imageAsset = Asset(
             id = "img_1", mediaUri = "content://image/1", mediaType = MediaType.IMAGE,
             displayName = "sticker.png", durationMs = 5000L, width = 512, height = 512,

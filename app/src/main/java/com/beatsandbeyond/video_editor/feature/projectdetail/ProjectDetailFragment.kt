@@ -328,8 +328,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         binding.labelText.trackTitle.text = "Text"
         binding.labelText.btnMute.visibility = View.GONE
         binding.labelText.btnLock.visibility = View.GONE
+        binding.labelText.btnPlus.alpha = 0.5f
         binding.labelText.btnPlus.setOnClickListener {
-            viewModel.addDefaultTextAtPlayhead()
+            Toast.makeText(context, "Text preview coming soon", Toast.LENGTH_SHORT).show()
         }
 
         binding.labelOverlay.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_overlay_bg))
@@ -337,8 +338,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         binding.labelOverlay.trackTitle.text = "Overlay"
         binding.labelOverlay.btnMute.visibility = View.GONE
         binding.labelOverlay.btnLock.visibility = View.GONE
+        binding.labelOverlay.btnPlus.alpha = 0.5f
         binding.labelOverlay.btnPlus.setOnClickListener {
-            pickOverlayLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            Toast.makeText(context, "Overlay preview coming soon", Toast.LENGTH_SHORT).show()
         }
 
         binding.labelEffect.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_effect_bg))
@@ -346,8 +348,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         binding.labelEffect.trackTitle.text = "Effect"
         binding.labelEffect.btnMute.visibility = View.GONE
         binding.labelEffect.btnLock.visibility = View.GONE
+        binding.labelEffect.btnPlus.alpha = 0.5f
         binding.labelEffect.btnPlus.setOnClickListener {
-            viewModel.addDefaultEffectAtPlayhead()
+            Toast.makeText(context, "Effect preview coming soon", Toast.LENGTH_SHORT).show()
         }
 
         binding.labelAdjustment.root.setBackgroundColor(ContextCompat.getColor(requireContext(), R.color.color_track_adjustment_bg))
@@ -355,8 +358,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
         binding.labelAdjustment.trackTitle.text = "Adjust"
         binding.labelAdjustment.btnMute.visibility = View.GONE
         binding.labelAdjustment.btnLock.visibility = View.GONE
+        binding.labelAdjustment.btnPlus.alpha = 0.5f
         binding.labelAdjustment.btnPlus.setOnClickListener {
-            viewModel.addDefaultAdjustmentAtPlayhead()
+            Toast.makeText(context, "Adjustment preview coming soon", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -456,11 +460,11 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
                     true
                 }
                 R.id.add_text -> {
-                    showAddTextDialog()
+                    Toast.makeText(context, "Text preview coming soon", Toast.LENGTH_SHORT).show()
                     true
                 }
                 R.id.add_overlay -> {
-                    showAssetPicker(AssetPickerBottomSheet.Mode.OVERLAY)
+                    Toast.makeText(context, "Overlay preview coming soon", Toast.LENGTH_SHORT).show()
                     true
                 }
                 else -> false

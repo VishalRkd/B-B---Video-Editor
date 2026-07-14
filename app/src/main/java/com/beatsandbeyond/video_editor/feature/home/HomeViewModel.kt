@@ -10,6 +10,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 /**
@@ -27,12 +28,15 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Loading)
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    private var loadJob: Job? = null
+
     init {
         loadProjects()
     }
 
     fun loadProjects() {
-        launchSafely {
+        if (loadJob?.isActive == true) return
+        loadJob = launchSafely {
             getAllProjectsUseCase().collect { result ->
                 Logger.d(tag, "Projects flow emitted: $result")
                 _uiState.value = when (result) {

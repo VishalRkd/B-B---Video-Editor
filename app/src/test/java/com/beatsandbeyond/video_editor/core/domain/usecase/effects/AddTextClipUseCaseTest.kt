@@ -20,7 +20,7 @@ class AddTextClipUseCaseTest {
 
     @Before
     fun setUp() {
-        useCase = AddTextClipUseCase()
+        useCase = AddTextClipUseCase(com.beatsandbeyond.video_editor.core.data.engine.KotlinTimelineEngine())
         project = Project(
             id = "project_1", name = "Test", createdAt = 0L, updatedAt = 0L,
             timeline = Timeline(id = "timeline_1", tracks = emptyList()),

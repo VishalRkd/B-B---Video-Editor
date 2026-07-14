@@ -3,6 +3,7 @@ package com.beatsandbeyond.video_editor.core.domain.usecase.timeline
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.engine.TimelineEngine
 import com.beatsandbeyond.video_editor.core.domain.model.Project
+import com.beatsandbeyond.video_editor.core.domain.model.TimelineValidator
 import javax.inject.Inject
 
 /**
@@ -52,9 +53,10 @@ class RippleTrimUseCase @Inject constructor(
             }.sortedBy { it.timelinePositionMs }
             t.copy(clips = updatedClips)
         }
-        return AppResult.Success(project.copy(
+        val updatedProject = project.copy(
             timeline = project.timeline.copy(tracks = updatedTracks),
             updatedAt = System.currentTimeMillis(),
-        ))
+        )
+        return TimelineValidator.validateAndReturn(updatedProject)
     }
 }

@@ -5,6 +5,10 @@ import com.beatsandbeyond.video_editor.core.domain.model.Clip
 import com.beatsandbeyond.video_editor.core.domain.model.Timeline
 import com.beatsandbeyond.video_editor.core.domain.model.Track
 import com.beatsandbeyond.video_editor.core.domain.model.Transition
+import com.beatsandbeyond.video_editor.core.domain.model.TrackType
+import com.beatsandbeyond.video_editor.core.domain.model.VideoFilter
+import com.beatsandbeyond.video_editor.core.domain.model.mapClip
+import com.beatsandbeyond.video_editor.core.domain.model.insertAndResolveOverlaps
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -103,9 +107,14 @@ class KotlinTimelineEngine @Inject constructor() : TimelineEngine {
             val selected = track.clips.filter { it.id in clipIds }
             if (selected.isEmpty()) return@map track
 
+            if (selected.any { it.timelinePositionMs + deltaMs < 0L }) {
+                overlaps = true
+                return@map track
+            }
+
             val stationary = track.clips.filter { it.id !in clipIds }
             val movedClips = selected.map { clip ->
-                clip.copy(timelinePositionMs = (clip.timelinePositionMs + deltaMs).coerceAtLeast(0L))
+                clip.copy(timelinePositionMs = clip.timelinePositionMs + deltaMs)
             }
 
             val hasOverlap = movedClips.any { moved ->
@@ -117,7 +126,7 @@ class KotlinTimelineEngine @Inject constructor() : TimelineEngine {
 
             val updatedClips = track.clips.map { clip ->
                 if (clip.id in clipIds) {
-                    clip.copy(timelinePositionMs = (clip.timelinePositionMs + deltaMs).coerceAtLeast(0L))
+                    clip.copy(timelinePositionMs = clip.timelinePositionMs + deltaMs)
                 } else clip
             }.sortedBy { it.timelinePositionMs }
             track.copy(clips = updatedClips)
@@ -155,5 +164,66 @@ class KotlinTimelineEngine @Inject constructor() : TimelineEngine {
         if (!exists) return null
         val updatedTransitions = timeline.transitions.filter { it.id != transitionId }
         return timeline.copy(transitions = updatedTransitions)
+    }
+
+    override fun addClipWithOverlapResolution(timeline: Timeline, trackType: TrackType, clip: Clip): Timeline {
+        val targetTrack = timeline.tracks.firstOrNull { it.type == trackType }
+        return if (targetTrack == null) {
+            timeline.copy(
+                tracks = timeline.tracks + Track(
+                    id = UUID.randomUUID().toString(),
+                    type = trackType,
+                    clips = listOf(clip),
+                )
+            )
+        } else {
+            val updatedTrack = targetTrack.insertAndResolveOverlaps(clip)
+            timeline.copy(
+                tracks = timeline.tracks.map { track ->
+                    if (track.id == targetTrack.id) updatedTrack else track
+                }
+            )
+        }
+    }
+
+    override fun addClipWithShift(timeline: Timeline, trackType: TrackType, clip: Clip): Timeline {
+        val targetTrack = timeline.tracks.firstOrNull { it.type == trackType }
+        val durationMs = clip.durationOnTimelineMs
+        val timelinePositionMs = clip.timelinePositionMs
+        return if (targetTrack == null) {
+            timeline.copy(
+                tracks = timeline.tracks + Track(
+                    id = UUID.randomUUID().toString(),
+                    type = trackType,
+                    clips = listOf(clip),
+                )
+            )
+        } else {
+            val newClips = targetTrack.clips.map { c ->
+                if (c.timelinePositionMs >= timelinePositionMs) {
+                    c.copy(timelinePositionMs = c.timelinePositionMs + durationMs)
+                } else c
+            } + clip
+            timeline.copy(
+                tracks = timeline.tracks.map { track ->
+                    if (track.id == targetTrack.id) {
+                        track.copy(clips = newClips.sortedBy { it.timelinePositionMs })
+                    } else track
+                }
+            )
+        }
+    }
+
+    override fun setClipSpeed(timeline: Timeline, clipId: String, speedFactor: Float): Timeline? {
+        return timeline.mapClip(clipId) { it.copy(speedFactor = speedFactor) }
+    }
+
+    override fun setClipVolume(timeline: Timeline, clipId: String, volume: Float): Timeline? {
+        val clamped = volume.coerceIn(0.0f, 2.0f)
+        return timeline.mapClip(clipId) { it.copy(volume = clamped) }
+    }
+
+    override fun setClipFilter(timeline: Timeline, clipId: String, filter: VideoFilter): Timeline? {
+        return timeline.mapClip(clipId) { it.copy(filter = filter) }
     }
 }

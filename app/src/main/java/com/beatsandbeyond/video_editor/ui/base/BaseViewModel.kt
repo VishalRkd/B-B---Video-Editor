@@ -35,8 +35,8 @@ abstract class BaseViewModel : ViewModel() {
      * Launches a coroutine in [viewModelScope] with the shared exception handler.
      * Prefer this over [viewModelScope.launch] to ensure consistent error handling.
      */
-    protected fun launchSafely(block: suspend CoroutineScope.() -> Unit) {
-        viewModelScope.launch(exceptionHandler) {
+    protected fun launchSafely(block: suspend CoroutineScope.() -> Unit): kotlinx.coroutines.Job {
+        return viewModelScope.launch(exceptionHandler) {
             block()
         }
     }

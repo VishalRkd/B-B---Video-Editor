@@ -3,6 +3,7 @@ package com.beatsandbeyond.video_editor.core.domain.usecase.timeline
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.engine.TimelineEngine
 import com.beatsandbeyond.video_editor.core.domain.model.Project
+import com.beatsandbeyond.video_editor.core.domain.model.TimelineValidator
 import javax.inject.Inject
 
 /**
@@ -18,9 +19,10 @@ class DeleteClipUseCase @Inject constructor(
         if (oldClipCount == newClipCount) {
             return AppResult.Error(NoSuchElementException("Clip $clipId not found"))
         }
-        return AppResult.Success(project.copy(
+        val updatedProject = project.copy(
             timeline = updatedTimeline,
             updatedAt = System.currentTimeMillis(),
-        ))
+        )
+        return TimelineValidator.validateAndReturn(updatedProject)
     }
 }

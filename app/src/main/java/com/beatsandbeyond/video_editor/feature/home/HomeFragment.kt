@@ -133,6 +133,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>() {
                 binding.emptyStateContainer.visibility = View.VISIBLE
                 binding.projectGrid.visibility = View.GONE
                 binding.fabNewProject.hide()
+                android.widget.Toast.makeText(context, state.message, android.widget.Toast.LENGTH_LONG).show()
             }
         }
     }

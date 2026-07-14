@@ -82,15 +82,33 @@ class MoveClipsUseCaseTest {
 
     @Test
     fun `move multiple clips with negative delta shifts back`() {
+        val clip1 = Clip(
+            id = clipId1,
+            assetId = "asset_1",
+            timelinePositionMs = 1000L,
+            trimStartMs = 0L,
+            trimEndMs = 5000L
+        )
+        val clip2 = Clip(
+            id = clipId2,
+            assetId = "asset_2",
+            timelinePositionMs = 6000L,
+            trimStartMs = 0L,
+            trimEndMs = 5000L
+        )
+        val track = Track("track_1", TrackType.VIDEO, listOf(clip1, clip2))
+        val testProject = project.copy(
+            timeline = Timeline("timeline_1", listOf(track))
+        )
+
         val deltaMs = -1000L
-        // Move BOTH clips back together — spacing preserved, no overlap.
-        val result = useCase(project, setOf(clipId1, clipId2), deltaMs)
+        val result = useCase(testProject, setOf(clipId1, clipId2), deltaMs)
 
         assertTrue(result is AppResult.Success)
         val updatedProject = (result as AppResult.Success).data
         val clips = updatedProject.timeline.tracks.first().clips
 
         assertEquals(0L, clips.find { it.id == clipId1 }?.timelinePositionMs)
-        assertEquals(4000L, clips.find { it.id == clipId2 }?.timelinePositionMs)
+        assertEquals(5000L, clips.find { it.id == clipId2 }?.timelinePositionMs)
     }
 }

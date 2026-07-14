@@ -3,6 +3,7 @@ package com.beatsandbeyond.video_editor.core.domain.usecase.timeline
 import com.beatsandbeyond.video_editor.core.common.AppResult
 import com.beatsandbeyond.video_editor.core.domain.engine.TimelineEngine
 import com.beatsandbeyond.video_editor.core.domain.model.Project
+import com.beatsandbeyond.video_editor.core.domain.model.TimelineValidator
 import javax.inject.Inject
 
 /**
@@ -26,9 +27,10 @@ class MoveClipsUseCase @Inject constructor(
 
         val updatedTimeline = timelineEngine.moveClips(project.timeline, clipIds, deltaMs)
             ?: return AppResult.Error(IllegalStateException("Clips cannot overlap on the same track"))
-        return AppResult.Success(project.copy(
+        val updatedProject = project.copy(
             timeline = updatedTimeline,
             updatedAt = System.currentTimeMillis(),
-        ))
+        )
+        return TimelineValidator.validateAndReturn(updatedProject)
     }
 }

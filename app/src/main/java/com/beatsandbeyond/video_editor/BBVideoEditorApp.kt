@@ -24,8 +24,8 @@ class BBVideoEditorApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
-        // Future: Initialize Timber for logging in debug builds
-        // Future: Initialize Firebase, analytics, etc.
+        val isDebuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        com.beatsandbeyond.video_editor.core.domain.model.DomainDebugConfig.isDebug = isDebuggable
     }
 
     override fun newImageLoader(): ImageLoader {
