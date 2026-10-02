@@ -1,0 +1,109 @@
+{
+	"curves": [
+      {
+        "id": 4,
+        "type": 1,
+        "imageUrl": "curve_template_straight_line",
+        "points": [{
+          "x": 2500,
+          "y": 7500
+        },
+          {
+            "x": 7500,
+            "y": 2500
+          }
+        ]
+      },
+      {
+		"id": 1,
+		"type": 1,
+		"imageUrl": "curve_template_easein_cubic",
+		"points": [{
+			"x": 5800,
+			"y": 8400
+		},
+        {
+            "x": 8700,
+            "y": 4800
+        }
+        ]
+	}, {
+		"id": 2,
+		"type": 1,
+		"imageUrl": "curve_template_ease_out_circ",
+		"points": [{
+			"x": 0,
+			"y": 4200
+		},
+			{
+				"x": 5000,
+				"y": 100
+			}
+		]
+	}, {
+		"id": 3,
+		"type": 1,
+		"imageUrl": "curve_template_easein_outquint",
+		"points": [{
+			"x": 8600,
+			"y": 10000
+		},
+			{
+				"x": 1300,
+				"y": 0
+			}
+		]
+	}, {
+		"id": 5,
+		"type": 1,
+		"imageUrl": "curve_template_middle",
+		"points": [{
+			"x": 0,
+			"y": 5000
+		},
+			{
+				"x": 10000,
+				"y": 5000
+			}
+		]
+	}, {
+		"id": 6,
+		"type": 1,
+		"imageUrl": "curve_template_easein_outsine",
+		"points": [{
+			"x": 5000,
+			"y": 10000
+		},
+			{
+				"x": 5000,
+				"y": 0
+			}
+		]
+	}, {
+		"id": 7,
+		"type": 1,
+		"imageUrl": "curve_template_easein_quint",
+		"points": [{
+			"x": 7200,
+			"y": 10000
+		},
+			{
+				"x": 10000,
+				"y": 4300
+			}
+		]
+	}, {
+		"id": 8,
+		"type": 1,
+		"imageUrl": "curve_template_easeout_sine",
+		"points": [{
+			"x": 2900,
+			"y": 3500
+		},
+			{
+				"x": 5600,
+				"y": 1100
+			}
+		]
+	}]
+}

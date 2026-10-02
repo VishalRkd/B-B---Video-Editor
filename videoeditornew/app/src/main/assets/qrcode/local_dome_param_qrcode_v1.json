@@ -1,0 +1,50 @@
+{
+  "paramAdjustModels": [
+    {"dataArray":[{"mID":1,"mValue":65},{"mID":2,"mValue":70},{"mID":4,"mValue":45},{"mID":3,"mValue":50},{"mID":5,"mValue":30},{"mID":6,"mValue":50},{"mID":7,"mValue":50},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":50},{"mID":11,"mValue":0}],"description":"清透","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"桃砸"},
+    {"dataArray":[{"mID":1,"mValue":35},{"mID":2,"mValue":55},{"mID":4,"mValue":50},{"mID":3,"mValue":60},{"mID":5,"mValue":70},{"mID":6,"mValue":50},{"mID":7,"mValue":50},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":50},{"mID":11,"mValue":0}],"description":"黄昏","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"桃砸"},
+    {"dataArray":[{"mID":1,"mValue":69},{"mID":2,"mValue":70},{"mID":4,"mValue":55},{"mID":3,"mValue":60},{"mID":5,"mValue":100},{"mID":6,"mValue":50},{"mID":7,"mValue":50},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":50},{"mID":11,"mValue":0}],"description":"金秋","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"桃砸"},
+    {"dataArray":[{"mID":1,"mValue":27},{"mID":2,"mValue":70},{"mID":4,"mValue":41},{"mID":3,"mValue":50},{"mID":5,"mValue":0},{"mID":6,"mValue":50},{"mID":7,"mValue":50},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":63},{"mID":11,"mValue":0}],"description":"忧郁","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"桃砸"},
+
+
+    {"dataArray":[{"mID":1,"mValue":50},{"mID":2,"mValue":60},{"mID":4,"mValue":35},{"mID":3,"mValue":50},{"mID":5,"mValue":54},{"mID":6,"mValue":50},{"mID":7,"mValue":60},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":0},{"mID":11,"mValue":0}],"description":"草莓汽水（发光系）","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"恬"},
+    {"dataArray":[{"mID":1,"mValue":20},{"mID":2,"mValue":50},{"mID":4,"mValue":35},{"mID":3,"mValue":50},{"mID":5,"mValue":50},{"mID":6,"mValue":50},{"mID":7,"mValue":50},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":100},{"mID":11,"mValue":0}],"description":"珊瑚汽水（发光系）","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"恬"},
+    {"dataArray":[{"mID":1,"mValue":20},{"mID":2,"mValue":50},{"mID":4,"mValue":50},{"mID":3,"mValue":50},{"mID":5,"mValue":0},{"mID":6,"mValue":50},{"mID":7,"mValue":53},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":100},{"mID":11,"mValue":0}],"description":"葡萄汽水（发光系）","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"恬"},
+
+
+
+    {"dataArray":[{"mID":1,"mValue":42},{"mID":2,"mValue":72},{"mID":4,"mValue":33},{"mID":3,"mValue":73},{"mID":5,"mValue":40},{"mID":6,"mValue":84},{"mID":7,"mValue":44},{"mID":8,"mValue":0},{"mID":9,"mValue":43},{"mID":10,"mValue":0},{"mID":11,"mValue":0}],"description":"堕落","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"森田"},
+    {"dataArray":[{"mID":1,"mValue":65},{"mID":2,"mValue":42},{"mID":4,"mValue":38},{"mID":3,"mValue":68},{"mID":5,"mValue":36},{"mID":6,"mValue":40},{"mID":7,"mValue":61},{"mID":8,"mValue":0},{"mID":9,"mValue":32},{"mID":10,"mValue":0},{"mID":11,"mValue":0}],"description":"粉红佳人","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"森田"},
+
+
+    {"dataArray":[{"mID":1,"mValue":39},{"mID":2,"mValue":69},{"mID":4,"mValue":25},{"mID":3,"mValue":39},{"mID":5,"mValue":8},{"mID":6,"mValue":79},{"mID":7,"mValue":84},{"mID":8,"mValue":0},{"mID":9,"mValue":36},{"mID":10,"mValue":73},{"mID":11,"mValue":0}],"description":"芭比粉","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"阿丢"},
+    {"dataArray":[{"mID":1,"mValue":45},{"mID":2,"mValue":74},{"mID":4,"mValue":33},{"mID":3,"mValue":54},{"mID":5,"mValue":18},{"mID":6,"mValue":75},{"mID":7,"mValue":56},{"mID":8,"mValue":0},{"mID":9,"mValue":45},{"mID":10,"mValue":59},{"mID":11,"mValue":0}],"description":"借光","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"阿丢"},
+
+
+    {"dataArray":[{"mID":1,"mValue":41},{"mID":2,"mValue":83},{"mID":4,"mValue":39},{"mID":3,"mValue":50},{"mID":5,"mValue":75},{"mID":6,"mValue":82},{"mID":7,"mValue":58},{"mID":8,"mValue":0},{"mID":9,"mValue":21},{"mID":10,"mValue":74},{"mID":11,"mValue":0}],"description":"废墟","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"老辞"},
+
+
+    {"dataArray":[{"mID":1,"mValue":34},{"mID":2,"mValue":38},{"mID":4,"mValue":37},{"mID":3,"mValue":40},{"mID":5,"mValue":64},{"mID":6,"mValue":21},{"mID":7,"mValue":56},{"mID":8,"mValue":0},{"mID":9,"mValue":40},{"mID":10,"mValue":60},{"mID":11,"mValue":9}],"description":"午日时光","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"诗妍佳_"},
+    {"dataArray":[{"mID":1,"mValue":69},{"mID":2,"mValue":57},{"mID":4,"mValue":31},{"mID":3,"mValue":66},{"mID":5,"mValue":30},{"mID":6,"mValue":50},{"mID":7,"mValue":47},{"mID":8,"mValue":0},{"mID":9,"mValue":64},{"mID":10,"mValue":28},{"mID":11,"mValue":0}],"description":"冬季","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"诗妍佳_"},
+    {"dataArray":[{"mID":1,"mValue":61},{"mID":2,"mValue":11},{"mID":4,"mValue":43},{"mID":3,"mValue":63},{"mID":5,"mValue":21},{"mID":6,"mValue":42},{"mID":7,"mValue":50},{"mID":8,"mValue":0},{"mID":9,"mValue":43},{"mID":10,"mValue":37},{"mID":11,"mValue":9}],"description":"温柔风","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"诗妍佳_"},
+
+
+
+    {"dataArray":[{"mID":1,"mValue":51},{"mID":2,"mValue":50},{"mID":4,"mValue":69},{"mID":3,"mValue":65},{"mID":5,"mValue":100},{"mID":6,"mValue":100},{"mID":7,"mValue":55},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":91},{"mID":11,"mValue":0}],"description":"日落","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"北顾"},
+
+
+    {"dataArray":[{"mID":1,"mValue":61},{"mID":2,"mValue":25},{"mID":4,"mValue":60},{"mID":3,"mValue":41},{"mID":5,"mValue":60},{"mID":6,"mValue":50},{"mID":7,"mValue":60},{"mID":8,"mValue":0},{"mID":9,"mValue":30},{"mID":10,"mValue":65},{"mID":11,"mValue":0}],"description":"薰衣草(风景码)","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"慌一烦."},
+    {"dataArray":[{"mID":1,"mValue":20},{"mID":2,"mValue":50},{"mID":4,"mValue":35},{"mID":3,"mValue":50},{"mID":5,"mValue":65},{"mID":6,"mValue":50},{"mID":7,"mValue":60},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":50},{"mID":11,"mValue":0}],"description":"明朗清晨(风景码).","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"慌一烦."},
+    {"dataArray":[{"mID":1,"mValue":70},{"mID":2,"mValue":70},{"mID":4,"mValue":40},{"mID":3,"mValue":50},{"mID":5,"mValue":21},{"mID":6,"mValue":50},{"mID":7,"mValue":60},{"mID":8,"mValue":0},{"mID":9,"mValue":35},{"mID":10,"mValue":30},{"mID":11,"mValue":0}],"description":"暖阳","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"慌一烦."},
+
+
+
+    {"dataArray":[{"mID":1,"mValue":45},{"mID":2,"mValue":44},{"mID":4,"mValue":48},{"mID":3,"mValue":42},{"mID":5,"mValue":36},{"mID":6,"mValue":26},{"mID":7,"mValue":52},{"mID":8,"mValue":0},{"mID":9,"mValue":58},{"mID":10,"mValue":53},{"mID":11,"mValue":33}],"description":"童年日记本（电影感）","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"江琪"},
+    {"dataArray":[{"mID":1,"mValue":0},{"mID":2,"mValue":70},{"mID":4,"mValue":35},{"mID":3,"mValue":65},{"mID":5,"mValue":0},{"mID":6,"mValue":60},{"mID":7,"mValue":70},{"mID":8,"mValue":0},{"mID":9,"mValue":50},{"mID":10,"mValue":40},{"mID":11,"mValue":20}],"description":"沉底（丧）","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"江琪"},
+
+
+    {"dataArray":[{"mID":1,"mValue":69},{"mID":2,"mValue":61},{"mID":4,"mValue":61},{"mID":3,"mValue":60},{"mID":5,"mValue":50},{"mID":6,"mValue":63},{"mID":7,"mValue":73},{"mID":8,"mValue":0},{"mID":9,"mValue":60},{"mID":10,"mValue":62},{"mID":11,"mValue":0}],"description":"梦幻(风景码)","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"奈奈"},
+
+
+    {"dataArray":[{"mID":1,"mValue":54},{"mID":2,"mValue":55},{"mID":4,"mValue":35},{"mID":3,"mValue":72},{"mID":5,"mValue":54},{"mID":6,"mValue":100},{"mID":7,"mValue":55},{"mID":8,"mValue":0},{"mID":9,"mValue":36},{"mID":10,"mValue":50},{"mID":11,"mValue":1}],"description":"枯萎","engineVersion":327685,"manageId":0,"type":"param_adjust","userName":"老魏"}
+  ]
+}

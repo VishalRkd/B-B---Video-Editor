@@ -1,0 +1,63 @@
+﻿<?xml version = "1.0" encoding = "utf-8"?>
+<root>
+    <main_info target_count="1"/>
+    <target comments="final output is for testing beat detection">
+  
+      <!--
+			asp_type
+			defined in qvasp.h shown below:
+				#define QASP_TYPE_AMPLITUDE_DETECTING	0x00000004
+				#define QASP_TYPE_FREQUENCE_ANALYSIS	0x00000005
+				#define QASP_TYPE_ONSET_DETECTION			0x00000006
+				#define QASP_TYPE_BEAT_DETECTION			0x00000014
+
+			time_window_width:
+				based on millisecond
+			
+			frequence_range
+			define in etaudioanalysiscomdef.h shown below:
+				#define AUDIO_FREQUENCY_RANGE_NONE		0x00000000
+				#define AFR_LOW						0x00000001 //低频范围，具体取值范围，外部无需关心
+				#define AFR_MIDDLE				0x00000002 //中频范围，具体取值范围，外部无需关心
+				#define AFR_HIGH					0x00000004 //高频范围，具体取值范围，外部无需关心
+				#define AFR_ALL						0x00000007 //所有频率范围，具体取值范围，外部无需关心	
+				
+				output_mode
+				#define QASP_OUTPUT_MODE_DECIBEL		0	//based on dB
+        #define QASP_OUTPUT_MODE_LINEAR		1	//not all asp support this mode
+		    -->
+        <basic_asp_info asp_type="0x14" time_window_width="30000" frequence_range="0x7" output_mode="1"/>
+        <procedure_list count="1">
+ 
+        <!-- 
+				math_function_type
+					define in etaudioanalysiscomdef.h shown below:
+					#define	MATH_FUNCTION_TYPE_NONE			0x00000000
+					#define	MFT_MAX											(MDT_FLOAT | 0x00000001) //0x00010001	语义上即取最大值
+					#define MFT_AVERAGE									(MDT_FLOAT | 0x00000002) //0x00010002	语义上即取平均值
+					#define MFT_LINEAR_RANGE_TO_RANGE		(MDT_FLOAT | 0x00000003) //0x00010003	
+					#define MFT_OUTPUT_DIRECT						(MDT_THIS_STEP_INPUT | 0x00000004) //0x80020004 语义上f(x[n]) = x[n], 即不对x[n]做任何数学处理
+					
+				input_math_data_type
+					define in etaudioanalysiscomdef.h shown below:
+					#define MATH_DATE_TYPE_BASE				0x00000000
+					#define MATH_DATE_TYPE_NONE				(MATH_DATE_TYPE_BASE)
+					
+					#define MDT_REAL_TYPE_BASE				(MATH_DATE_TYPE_BASE + 0x00000000)
+					#define MDT_FLOAT							(MATH_DATE_TYPE_BASE + 0x00010000) //0x00010000, 数据就是一个浮点型数据MFloat
+					#define MDT_SPECTRUM						(MATH_DATE_TYPE_BASE + 0x00020000) //0x00020000, 数据是ASP模块输出的ASP_FREQUENCE_SPECTRUM_RESULT
+					#define MDT_VOLUMN_SET						(MATH_DATE_TYPE_BASE + 0x00030000) //0x00030000, 数据是ASP模块输出的ASP_AMPLITUDE_DETECT_RESULT
+					#define MDT_ONSET_SET						(MATH_DATE_TYPE_BASE + 0x00040000) //0x00040000, 数据是ASP模块输出的ASP_ONSET_DETECTION_RESULT
+					#define MDT_FLOAT_GROUP					(MATH_DATE_TYPE_BASE + 0x00050000) //0x00050000, 数据时AA_FLOAT_GROUP
+                    #define MDT_BEAT_SET					(MATH_DATE_TYPE_BASE + 0x00070000)//0x00070000, 数据是ASP模块输出的ASP_BEAT_DETECTION_RESULT
+
+					#define MDT_VIRTUAL_TYPE_BASE	(MATH_DATE_TYPE_BASE + 0x80000000)//0x80000000 //语义上的完整，不要将该值用于模板配置
+					#define MDT_LAST_STEP_OUTPUT	(MATH_DATE_TYPE_BASE + 0x80010000)//0x80010000
+					#define MDT_THIS_STEP_INPUT		(MATH_DATE_TYPE_BASE + 0x80020000)//0x80020000	
+					#define MDT_GENERIC						(MATH_DATE_TYPE_BASE + 0x80030000)//0x80030000, 泛型数据，先不要碰这种
+			   -->		
+            <procedure_config math_function_type="0x80020004" input_math_data_type="0x00070000">
+            </procedure_config>
+        </procedure_list>
+    </target>
+</root>

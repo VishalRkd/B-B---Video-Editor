@@ -1,0 +1,55 @@
+{
+    "langusges": [
+        {
+            "countryCode": "CN",
+            "language": [
+                {
+                    "code": "zh",
+                    "text": "中文"
+                }
+            ]
+        },
+        {
+            "countryCode": "US",
+            "language": [
+                {
+                    "code": "en",
+                    "text": "English"
+                },
+                {
+                    "code": "es",
+                    "text": "Español"
+                }
+            ]
+        },
+        {
+            "countryCode": "IN",
+            "language": [
+                {
+                    "code": "en",
+                    "text": "English"
+                },
+                {
+                    "code": "hi",
+                    "text": "hindi"
+                },
+                {
+                    "code": "ta",
+                    "text": "tamil"
+                },{
+                    "code": "te",
+                    "text": "Telugu"
+                }
+            ]
+        },
+        {
+            "countryCode": "default",
+            "language": [
+                {
+                    "code": "en",
+                    "text": "English"
+                }
+            ]
+        }
+    ]
+}

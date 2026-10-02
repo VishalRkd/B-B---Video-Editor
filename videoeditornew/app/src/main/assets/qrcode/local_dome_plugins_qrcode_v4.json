@@ -1,0 +1,2008 @@
+{
+    "plugins": [
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 3000
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 3000
+                        },
+                        {
+                            "mParamId": 7,
+                            "mValue": 1
+                        }
+                    ],
+                    "templateCode": "0x0400600000000469"
+                },
+                {
+                    "arrayMap": {
+                        "uScaleX": [
+                            {
+                                "attrName": "uScaleX",
+                                "value": 250,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 8473
+                                            },
+                                            "c1": {
+                                                "x": 4844,
+                                                "y": 10000
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uScaleX",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 1500,
+                                "method": 3,
+                                "relativeTime": 1500
+                            }
+                        ],
+                        "uSpin": [
+                            {
+                                "attrName": "uSpin",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 7200,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 5700
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 7
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uSpin",
+                                "value": -180,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 1500,
+                                "method": 3,
+                                "relativeTime": 1500
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": -90
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": -180
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 250
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x040060000000053B"
+                }
+            ],
+            "description": "3D立方体1",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 1500,
+            "type":"plugins_text",
+            "userName": "忱鳞"
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 3000
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 3000
+                        },
+                        {
+                            "mParamId": 7,
+                            "mValue": 1
+                        }
+                    ],
+                    "templateCode": "0x0400600000000469"
+                },
+                {
+                    "arrayMap": {
+                        "uScaleX": [
+                            {
+                                "attrName": "uScaleX",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 6935,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 9896,
+                                                "y": 2448
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uScaleX",
+                                "value": 250,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 1500,
+                                "method": 3,
+                                "relativeTime": 1500
+                            }
+                        ],
+                        "uSpin": [
+                            {
+                                "attrName": "uSpin",
+                                "value": 180,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uSpin",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 1500,
+                                "method": 3,
+                                "relativeTime": 1500
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 180
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 250
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x040060000000053B"
+                }
+            ],
+            "description": "3D立方体2",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 1500,
+            "type":"plugins_text",
+            "userName": "忱鳞"
+        },
+
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "uWaveHigth": [
+                            {
+                                "attrName": "uWaveHigth",
+                                "value": 29,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uWaveHigth",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 1538,
+                                "method": 3,
+                                "relativeTime": 1538
+                            }
+                        ],
+                        "uWaveSpeed": [
+                            {
+                                "attrName": "uWaveSpeed",
+                                "value": 24,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uWaveSpeed",
+                                "value": 10,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 2048,
+                                "method": 3,
+                                "relativeTime": 2048
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 5000
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 5000
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 2
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 24
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 7,
+                            "mValue": 29
+                        }
+                    ],
+                    "templateCode": "0x0400600000000547"
+                }
+            ],
+            "description": "波纹转场1",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 3000,
+            "type":"plugins_text",
+            "userName": "小猪"
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "uTumble": [
+                            {
+                                "attrName": "uTumble",
+                                "value": -90,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 7681
+                                            },
+                                            "c1": {
+                                                "x": 4562,
+                                                "y": 10000
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uTumble",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 3000,
+                                "method": 3,
+                                "relativeTime": 3000
+                            }
+                        ],
+                        "uRotate": [
+                            {
+                                "attrName": "uRotate",
+                                "value": -90,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 7097
+                                            },
+                                            "c1": {
+                                                "x": 4518,
+                                                "y": 10000
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uRotate",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 3000,
+                                "method": 3,
+                                "relativeTime": 3000
+                            }
+                        ],
+                        "uSpin": [
+                            {
+                                "attrName": "uSpin",
+                                "value": 90,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 7146
+                                            },
+                                            "c1": {
+                                                "x": 5077,
+                                                "y": 10000
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uSpin",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 3000,
+                                "method": 3,
+                                "relativeTime": 3000
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": -90
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 90
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": -90
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 100
+                        }
+                    ],
+                    "templateCode": "0x040060000000053A"
+                },
+                {
+                    "arrayMap": {
+                        "uWaveWidth": [
+                            {
+                                "attrName": "uWaveWidth",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 721,
+                                "method": 3,
+                                "relativeTime": 721
+                            }
+                        ],
+                        "uWaveHigth": [
+                            {
+                                "attrName": "uWaveHigth",
+                                "value": 28,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uWaveHigth",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 3000,
+                                "method": 3,
+                                "relativeTime": 3000
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 5000
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 5000
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 2
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 5
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 69
+                        },
+                        {
+                            "mParamId": 7,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x0400600000000547"
+                }
+            ],
+            "description": "波纹转场2",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 3000,
+            "type":"plugins_text",
+            "userName": "奶熙"
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 100
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 3000
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 3000
+                        },
+                        {
+                            "mParamId": 7,
+                            "mValue": 1
+                        }
+                    ],
+                    "templateCode": "0x0400600000000469"
+                },
+                {
+                    "arrayMap": {
+                        "u_skew": [
+                            {
+                                "attrName": "u_skew",
+                                "value": 53,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 2900,
+                                                "y": 6500
+                                            },
+                                            "c1": {
+                                                "x": 5600,
+                                                "y": 8900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 8
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_skew",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ],
+                        "u_skew_axis": [
+                            {
+                                "attrName": "u_skew_axis",
+                                "value": -124,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_skew_axis",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x0400600000000491"
+                }
+            ],
+            "description": "倾斜变换",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 693,
+            "type":"plugins_text",
+            "userName": "宸宇."
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "u_shrinkk": [
+                            {
+                                "attrName": "u_shrinkk",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 7200,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 5700
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 7
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_shrinkk",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ],
+                        "u_grow": [
+                            {
+                                "attrName": "u_grow",
+                                "value": 200,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_grow",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 1
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 100
+                        }
+                    ],
+                    "templateCode": "0x0400600000000507"
+                },
+                {
+                    "arrayMap": {
+                        "u_shrinkk": [
+                            {
+                                "attrName": "u_shrinkk",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 7200,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 5700
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 7
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_shrinkk",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ],
+                        "u_grow": [
+                            {
+                                "attrName": "u_grow",
+                                "value": 200,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_grow",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 1
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 100
+                        }
+                    ],
+                    "templateCode": "0x0400600000000507"
+                },
+                {
+                    "arrayMap": {
+                        "u_amount": [
+                            {
+                                "attrName": "u_amount",
+                                "value": 20,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 2900,
+                                                "y": 6500
+                                            },
+                                            "c1": {
+                                                "x": 5600,
+                                                "y": 8900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 8
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_amount",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 20
+                        }
+                    ],
+                    "templateCode": "0x0400600000000483"
+                },
+                {
+                    "arrayMap": {
+                        "u_amount": [
+                            {
+                                "attrName": "u_amount",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 7200,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 5700
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 7
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_amount",
+                                "value": 48,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 20
+                        }
+                    ],
+                    "templateCode": "0x0400600000000483"
+                },
+                {
+                    "arrayMap": {
+                        "u_amount": [
+                            {
+                                "attrName": "u_amount",
+                                "value": 20,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 2900,
+                                                "y": 6500
+                                            },
+                                            "c1": {
+                                                "x": 5600,
+                                                "y": 8900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 8
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_amount",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 693,
+                                "method": 3,
+                                "relativeTime": 693
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 20
+                        }
+                    ],
+                    "templateCode": "0x0400600000000483"
+                }
+            ],
+            "description": "连续脉冲",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 693,
+            "type":"plugins_text",
+            "userName": "宸宇."
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "u_fov": [
+                            {
+                                "attrName": "u_fov",
+                                "value": 180,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 2900,
+                                                "y": 6500
+                                            },
+                                            "c1": {
+                                                "x": 5600,
+                                                "y": 8900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 8
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_fov",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 3096,
+                                "method": 3,
+                                "relativeTime": 3096
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 5000
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 5000
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x0400600000000486"
+                }
+            ],
+            "description": "膨胀1",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 3096,
+            "type":"plugins_text",
+            "userName": "宸宇."
+        },
+
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "uScaleX": [
+                            {
+                                "attrName": "uScaleX",
+                                "value": 60,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 5207,
+                                                "y": 10000
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uScaleX",
+                                "value": 100,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 520,
+                                "method": 3,
+                                "relativeTime": 520
+                            }
+                        ],
+                        "uSpin": [
+                            {
+                                "attrName": "uSpin",
+                                "value": -124,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 2900,
+                                                "y": 6500
+                                            },
+                                            "c1": {
+                                                "x": 5600,
+                                                "y": 8900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 8
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "uSpin",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 474,
+                                "method": 3,
+                                "relativeTime": 474
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": -124
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 100
+                        }
+                    ],
+                    "templateCode": "0x040060000000053A"
+                }
+            ],
+            "description": "3D翻转2",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 825,
+            "type":"plugins_text",
+            "userName": "Aling"
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "u_insideRotate": [
+                            {
+                                "attrName": "u_insideRotate",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 265,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 7200,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 5700
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 7
+                                },
+                                "method": 3,
+                                "relativeTime": 265
+                            },
+                            {
+                                "attrName": "u_insideRotate",
+                                "value": 90,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 828,
+                                "method": 3,
+                                "relativeTime": 828
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 25
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 90
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 10
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 10
+                        }
+                    ],
+                    "templateCode": "0x0400600000000526"
+                },
+                {
+                    "arrayMap": {
+                        "u_amount": [
+                            {
+                                "attrName": "u_amount",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 349,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 6764,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 1852
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 349
+                            },
+                            {
+                                "attrName": "u_amount",
+                                "value": 40,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 828,
+                                "method": 3,
+                                "relativeTime": 828
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 40
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x0400600000000484"
+                }
+            ],
+            "description": "六分形带模糊1",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 828,
+            "type":"plugins_text",
+            "userName": "Aling"
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "u_insideRotate": [
+                            {
+                                "attrName": "u_insideRotate",
+                                "value": -90,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_insideRotate",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 612,
+                                "method": 3,
+                                "relativeTime": 612
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 25
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": -90
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 10
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 10
+                        }
+                    ],
+                    "templateCode": "0x0400600000000526"
+                },
+                {
+                    "arrayMap": {
+                        "u_amount": [
+                            {
+                                "attrName": "u_amount",
+                                "value": 40,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 7043
+                                            },
+                                            "c1": {
+                                                "x": 2587,
+                                                "y": 10000
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": -1
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_amount",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 459,
+                                "method": 3,
+                                "relativeTime": 459
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 50
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 40
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x0400600000000484"
+                }
+            ],
+            "description": "六分形带模糊2",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 847,
+            "type":"plugins_text",
+            "userName": "Aling"
+        },
+        {
+            "plugins": [
+                {
+                    "arrayMap": {
+                        "u_magnitude": [
+                            {
+                                "attrName": "u_magnitude",
+                                "value": 274,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_magnitude",
+                                "value": 1,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 990,
+                                "method": 3,
+                                "relativeTime": 990
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 30
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 274
+                        }
+                    ],
+                    "templateCode": "0x0400600000000506"
+                },
+                {
+                    "arrayMap": {
+                        "u_magnitude": [
+                            {
+                                "attrName": "u_magnitude",
+                                "value": 164,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_magnitude",
+                                "value": 1,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 913,
+                                "method": 3,
+                                "relativeTime": 913
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 15
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 164
+                        }
+                    ],
+                    "templateCode": "0x0400600000000506"
+                },
+                {
+                    "arrayMap": {
+                        "u_blur_length": [
+                            {
+                                "attrName": "u_blur_length",
+                                "value": 150,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 0,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 0,
+                                                "y": 5800
+                                            },
+                                            "c1": {
+                                                "x": 5000,
+                                                "y": 9900
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 2
+                                },
+                                "method": 3,
+                                "relativeTime": 0
+                            },
+                            {
+                                "attrName": "u_blur_length",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 1096,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 7200,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 5700
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 7
+                                },
+                                "method": 3,
+                                "relativeTime": 1096
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 150
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 150
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 0
+                        }
+                    ],
+                    "templateCode": "0x0400600000000480"
+                },
+                {
+                    "arrayMap": {
+                        "u_blur_length": [
+                            {
+                                "attrName": "u_blur_length",
+                                "value": 0,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 701,
+                                "easingInfo": {
+                                    "curves": [
+                                        {
+                                            "c0": {
+                                                "x": 7200,
+                                                "y": 0
+                                            },
+                                            "c1": {
+                                                "x": 10000,
+                                                "y": 5700
+                                            },
+                                            "start": {
+                                                "x": 0,
+                                                "y": 0
+                                            },
+                                            "stop": {
+                                                "x": 10000,
+                                                "y": 10000
+                                            }
+                                        }
+                                    ],
+                                    "id": 7
+                                },
+                                "method": 3,
+                                "relativeTime": 701
+                            },
+                            {
+                                "attrName": "u_blur_length",
+                                "value": 74,
+                                "Type": "ATTRIBUTE",
+                                "curTime": 1567,
+                                "method": 3,
+                                "relativeTime": 1567
+                            }
+                        ]
+                    },
+                    "attributes": [
+                        {
+                            "mParamId": 1,
+                            "mValue": 74
+                        },
+                        {
+                            "mParamId": 2,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 3,
+                            "mValue": 0
+                        },
+                        {
+                            "mParamId": 4,
+                            "mValue": 1
+                        },
+                        {
+                            "mParamId": 5,
+                            "mValue": 1
+                        },
+                        {
+                            "mParamId": 6,
+                            "mValue": 1
+                        }
+                    ],
+                    "templateCode": "0x0400600000000482"
+                }
+            ],
+            "description": "震荡带模糊",
+            "engineVersion": 327690,
+            "manageId": 0,
+            "timeLength": 1567,
+            "type":"plugins_text",
+            "userName": "玖汐"
+        }
+
+    ]
+}

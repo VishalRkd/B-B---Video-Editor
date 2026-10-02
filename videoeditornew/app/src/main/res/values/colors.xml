@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#FF3B5C</color>
+    <color name="primary_variant">#D62846</color>
+    <color name="background_dark">#121214</color>
+    <color name="surface_dark">#1E1E24</color>
+    <color name="timeline_track">#2A2A35</color>
+    <color name="timeline_handle">#FFD700</color>
+    <color name="timeline_playhead">#FF3B5C</color>
+</resources>
