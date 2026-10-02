@@ -99,6 +99,7 @@ class ExportWorker(
         return try {
             var exportSuccess = false
             var errorMsg: String? = null
+            var publicCompletedPath = outputPath
 
             exportEngine.export(project, config).collect { progress ->
                 when (progress) {
@@ -121,6 +122,7 @@ class ExportWorker(
                     }
                     is ExportProgress.Completed -> {
                         exportSuccess = true
+                        publicCompletedPath = progress.publicPath ?: progress.outputPath
                     }
                     is ExportProgress.Failed -> {
                         errorMsg = progress.cause.message ?: "Export failed"
@@ -135,7 +137,7 @@ class ExportWorker(
                 showSuccessNotification(outputPath)
                 Result.success(workDataOf(
                     KEY_STATE to "COMPLETED",
-                    KEY_COMPLETED_PATH to outputPath
+                    KEY_COMPLETED_PATH to publicCompletedPath
                 ))
             } else {
                 showFailureNotification(errorMsg ?: "Export failed")

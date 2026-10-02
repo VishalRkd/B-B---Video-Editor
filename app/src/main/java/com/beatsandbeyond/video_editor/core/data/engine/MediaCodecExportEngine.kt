@@ -184,11 +184,12 @@ class MediaCodecExportEngine @Inject constructor(
             muxer.release()
             muxer = null
 
-            registerInMediaStore(outputFile, config)
+            val publicPath = registerInMediaStore(outputFile, config)
             emit(
                 ExportProgress.Completed(
                     outputPath = outputFile.absolutePath,
                     durationMs = System.currentTimeMillis() - startTime,
+                    publicPath = publicPath
                 )
             )
         } catch (e: Exception) {
@@ -820,6 +821,11 @@ class MediaCodecExportEngine @Inject constructor(
     // ── Output file + MediaStore registration ───────────────────────────────
 
     private fun createOutputFile(config: ExportConfig): File {
+        if (config.outputPath.isNotEmpty()) {
+            val file = File(config.outputPath)
+            file.parentFile?.mkdirs()
+            return file
+        }
         val dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES)
             ?: context.filesDir
         dir.mkdirs()
@@ -827,40 +833,62 @@ class MediaCodecExportEngine @Inject constructor(
         return File(dir, "$baseName.${config.format.name.lowercase()}")
     }
 
-    private fun registerInMediaStore(file: File, config: ExportConfig) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val values = android.content.ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/B&B Editor")
-                put(MediaStore.Video.Media.IS_PENDING, 1)
+    private fun getFilePathFromUri(uri: Uri): String? {
+        val proj = arrayOf(MediaStore.Video.Media.DATA)
+        return try {
+            context.contentResolver.query(uri, proj, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val columnIndex = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
+                    cursor.getString(columnIndex)
+                } else null
             }
-            val resolver = context.contentResolver
-            val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val itemUri = resolver.insert(collection, values) ?: return
-            resolver.openOutputStream(itemUri)?.use { out ->
-                file.inputStream().use { it.copyTo(out) }
+        } catch (e: Exception) {
+            Logger.e(TAG, "Failed to query filepath for uri $uri", e)
+            null
+        }
+    }
+
+    private fun registerInMediaStore(file: File, config: ExportConfig): String {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/BBVideoEditor")
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                val itemUri = resolver.insert(collection, values) ?: return file.absolutePath
+                resolver.openOutputStream(itemUri)?.use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                }
+                values.clear()
+                values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                resolver.update(itemUri, values, null, null)
+                return getFilePathFromUri(itemUri) ?: file.absolutePath
+            } else {
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    @Suppress("DEPRECATION")
+                    put(MediaStore.Video.Media.DATA, file.absolutePath)
+                }
+                val resolver = context.contentResolver
+                val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                resolver.insert(collection, values)
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(file.absolutePath),
+                    arrayOf("video/mp4")
+                ) { path, uri ->
+                    Logger.d(TAG, "Legacy MediaStore registration for path $path: $uri")
+                }
+                return file.absolutePath
             }
-            values.clear()
-            values.put(MediaStore.Video.Media.IS_PENDING, 0)
-            resolver.update(itemUri, values, null, null)
-        } else {
-            val values = android.content.ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                @Suppress("DEPRECATION")
-                put(MediaStore.Video.Media.DATA, file.absolutePath)
-            }
-            val resolver = context.contentResolver
-            val collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            resolver.insert(collection, values)
-            android.media.MediaScannerConnection.scanFile(
-                context,
-                arrayOf(file.absolutePath),
-                arrayOf("video/mp4")
-            ) { path, uri ->
-                Logger.d(TAG, "Legacy MediaStore registration for path $path: $uri")
-            }
+        } catch (e: Exception) {
+            Logger.e(TAG, "Failed to register in MediaStore", e)
+            return file.absolutePath
         }
     }
 

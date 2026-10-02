@@ -26,6 +26,7 @@ sealed class ExportProgress {
     data class Completed(
         val outputPath: String,
         val durationMs: Long,
+        val publicPath: String? = null,
     ) : ExportProgress()
 
     /**

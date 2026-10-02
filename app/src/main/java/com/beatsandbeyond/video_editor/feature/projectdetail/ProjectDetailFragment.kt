@@ -606,8 +606,9 @@ class ProjectDetailFragment : BaseFragment<FragmentProjectDetailBinding>() {
     }
 
     private fun createExportOutputPath(): String {
-        val dir = requireContext().getExternalFilesDir(Environment.DIRECTORY_MOVIES)
-            ?: requireContext().filesDir
+        val dir = File(requireContext().filesDir, "exports").apply {
+            if (!exists()) mkdirs()
+        }
         val fileName = "bb_export_${System.currentTimeMillis()}.mp4"
         return File(dir, fileName).absolutePath
     }
