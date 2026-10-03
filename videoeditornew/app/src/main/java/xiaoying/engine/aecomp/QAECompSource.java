@@ -45,4 +45,56 @@ public class QAECompSource {
         qAECompSource.sourceType = 1;
         return qAECompSource;
     }
+
+    public static QAECompSource createAVSource(String filePath, boolean reverse) {
+        return createAVSource(new QMediaSource(QMediaSource.TYPE_FILE, false, filePath), reverse, false);
+    }
+
+    public QMediaSource getSource() {
+        return this.source;
+    }
+
+    public void setSource(QMediaSource source) {
+        this.source = source;
+    }
+
+    public int getSourceType() {
+        return this.sourceType;
+    }
+
+    public void setSourceType(int sourceType) {
+        this.sourceType = sourceType;
+    }
+
+    public boolean isReverse() {
+        return this.reverse;
+    }
+
+    public void setReverse(boolean reverse) {
+        this.reverse = reverse;
+    }
+
+    public boolean isUse2Replace() {
+        return this.use2Replace;
+    }
+
+    public void setUse2Replace(boolean use2Replace) {
+        this.use2Replace = use2Replace;
+    }
+
+    public int getEffectMode() {
+        return this.effectMode;
+    }
+
+    public void setEffectMode(int effectMode) {
+        this.effectMode = effectMode;
+    }
+
+    public QMediaMulSource getMultiSource() {
+        return this.multiSource;
+    }
+
+    public void setMultiSource(QMediaMulSource multiSource) {
+        this.multiSource = multiSource;
+    }
 }

@@ -590,4 +590,70 @@ public class QClip extends QSession {
         }
         return nativeCreateWithInfo(engine, clipSource, clipType, videoInfo, extInfo);
     }
+
+    // --- Advanced Engine Ergonomic APIs ---
+
+    public int setTrimRange(int startMs, int lengthMs) {
+        return setProperty(PROP_TRIM_RANGE, new xiaoying.engine.base.QRange(startMs, lengthMs));
+    }
+
+    public xiaoying.engine.base.QRange getTrimRange() {
+        Object val = getProperty(PROP_TRIM_RANGE);
+        return val instanceof xiaoying.engine.base.QRange ? (xiaoying.engine.base.QRange) val : null;
+    }
+
+    public int setTimeScale(float scale) {
+        return setProperty(PROP_TIME_SCALE, Float.valueOf(scale));
+    }
+
+    public float getTimeScale() {
+        Object val = getProperty(PROP_TIME_SCALE);
+        return val instanceof Float ? ((Float) val).floatValue() : 1.0f;
+    }
+
+    public int setRotation(int degrees) {
+        return setProperty(PROP_CLIP_ROTATION, Integer.valueOf(degrees));
+    }
+
+    public int getRotation() {
+        Object val = getProperty(PROP_CLIP_ROTATION);
+        return val instanceof Integer ? ((Integer) val).intValue() : 0;
+    }
+
+    public int setAudioDisabled(boolean disabled) {
+        return setProperty(PROP_AUDIO_DISABLED, Boolean.valueOf(disabled));
+    }
+
+    public boolean isAudioDisabled() {
+        Object val = getProperty(PROP_AUDIO_DISABLED);
+        return val instanceof Boolean ? ((Boolean) val).booleanValue() : false;
+    }
+
+    public int setAudioVolume(int percent) {
+        return setProperty(PROP_CLIP_AUDIO_MIX_PERCENT, Integer.valueOf(percent));
+    }
+
+    public int getAudioVolume() {
+        Object val = getProperty(PROP_CLIP_AUDIO_MIX_PERCENT);
+        return val instanceof Integer ? ((Integer) val).intValue() : 100;
+    }
+
+    public int setTransition(QTransition transition) {
+        return setProperty(PROP_TRANSITION, transition);
+    }
+
+    public QTransition getTransition() {
+        Object val = getProperty(PROP_TRANSITION);
+        return val instanceof QTransition ? (QTransition) val : null;
+    }
+
+    public int setVideoFade(int fadeInMs, int fadeOutMs) {
+        setProperty(PROP_VIDEO_FADEIN, Integer.valueOf(fadeInMs));
+        return setProperty(PROP_VIDEO_FADEOUT, Integer.valueOf(fadeOutMs));
+    }
+
+    public int setAudioFade(int fadeInMs, int fadeOutMs) {
+        setProperty(PROP_AUDIO_FADEIN, Integer.valueOf(fadeInMs));
+        return setProperty(PROP_AUDIO_FADEOUT, Integer.valueOf(fadeOutMs));
+    }
 }

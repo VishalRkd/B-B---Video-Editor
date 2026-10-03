@@ -527,4 +527,61 @@ public class QStoryboard extends QSession {
         }
         return this.frameworkVersion == 393216 ? nativeWaitApplySmartThemeCompleteAEWrapper(j10) : nativeWaitApplySmartThemeComplete(j10);
     }
+
+    // --- Advanced Engine Ergonomic APIs ---
+
+    public int addClip(QClip clip) {
+        return insertClip(clip, getClipCount());
+    }
+
+    public java.util.List<QClip> getAllClips() {
+        int count = getClipCount();
+        java.util.List<QClip> list = new java.util.ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            QClip c = getClip(i);
+            if (c != null) {
+                list.add(c);
+            }
+        }
+        return list;
+    }
+
+    public int setClipTrim(int clipIndex, int startMs, int lengthMs) {
+        QClip clip = getClip(clipIndex);
+        if (clip == null) return QVEError.QERR_COMMON_JAVA_INVALID_PARAM;
+        int ret = clip.setTrimRange(startMs, lengthMs);
+        if (ret == 0) {
+            applyTrim();
+        }
+        return ret;
+    }
+
+    public int setClipSpeed(int clipIndex, float speed) {
+        QClip clip = getClip(clipIndex);
+        if (clip == null) return QVEError.QERR_COMMON_JAVA_INVALID_PARAM;
+        int ret = clip.setTimeScale(speed);
+        if (ret == 0) {
+            applyTrim();
+        }
+        return ret;
+    }
+
+    public int setClipRotation(int clipIndex, int degrees) {
+        QClip clip = getClip(clipIndex);
+        if (clip == null) return QVEError.QERR_COMMON_JAVA_INVALID_PARAM;
+        return clip.setRotation(degrees);
+    }
+
+    public int setClipVolume(int clipIndex, int volumePercent, boolean isMuted) {
+        QClip clip = getClip(clipIndex);
+        if (clip == null) return QVEError.QERR_COMMON_JAVA_INVALID_PARAM;
+        clip.setAudioDisabled(isMuted);
+        return clip.setAudioVolume(volumePercent);
+    }
+
+    public int applyTransition(int clipIndex, QTransition transition) {
+        QClip clip = getClip(clipIndex);
+        if (clip == null) return QVEError.QERR_COMMON_JAVA_INVALID_PARAM;
+        return clip.setTransition(transition);
+    }
 }
