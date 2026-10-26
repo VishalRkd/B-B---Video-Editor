@@ -5,7 +5,7 @@ Validated on 26 October 2026 using JDK 17, Android SDK 36, and an ARM64 Pixel 5 
 | Check | Result |
 | --- | --- |
 | Core JVM tests | 25 passed |
-| Android JVM tests | 6 passed |
+| Android JVM tests | 10 passed |
 | Emulator integration tests | 11 passed |
 | Debug APK | Built and installed |
 | Optimized release APK | Built, unsigned |
@@ -13,7 +13,7 @@ Validated on 26 October 2026 using JDK 17, Android SDK 36, and an ARM64 Pixel 5 
 
 The integration suite covers three Compose gesture tests, four media/persistence tests, two preview tests, one render test, and one foreground export test. Preview assertions inspect actual SurfaceView pixels. Render assertions inspect decoded frames, audio amplitude, frame counts, and packet timestamps. Export tests exercise MediaStore publication and cancellation cleanup.
 
-The complete emulator suite passed in 129.381 seconds. Subsequent changes only adjusted system-bar appearance, bottom insets, and export close-icon contrast; those changes were rebuilt, linted, and inspected on the emulator.
+The complete emulator suite passed in 129.381 seconds. Subsequent visual changes adjusted system-bar appearance, bottom insets, and export close-icon contrast. Export selection also gained an automatic supported fallback, with four additional unit tests for coupled resolution/FPS changes, codec fallback, unchanged supported settings, and absent encoders. These changes were rebuilt, linted, and inspected on the emulator.
 
 ## Reproduce
 

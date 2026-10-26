@@ -26,6 +26,25 @@ data class ExportSettings(
         return if (ratio >= 1f) even(resolution * ratio) to resolution else resolution to even(resolution / ratio)
     }
     fun estimatedBytes(durationUs: Long): Long = ((bitrate + 192_000L) * (durationUs / 1_000_000.0) / 8).toLong()
+
+    fun supportedBy(project: Project, capabilities: List<EncoderCapability>): Boolean {
+        val (width, height) = dimensions(project)
+        return capabilities.any { it.supported && it.codec == codec && it.width == width && it.height == height && it.frameRate == frameRate }
+    }
+
+    /** Change coupled settings together so a device cannot become stuck between disabled choices. */
+    fun supportedFallback(project: Project, capabilities: List<EncoderCapability>): ExportSettings? {
+        for (candidateCodec in (listOf(codec) + VideoCodec.entries).distinct()) {
+            for (candidateResolution in listOf(resolution, 1080, 720, 2160).distinct()) {
+                for (candidateFps in listOf(frameRate, 30, 25, 24, 50, 60).distinct()) {
+                    val candidate = copy(codec = candidateCodec, resolution = candidateResolution, frameRate = candidateFps)
+                    if (candidate.supportedBy(project, capabilities)) return candidate
+                }
+            }
+        }
+        return null
+    }
+
     private fun even(value: Float): Int = ((value / 2).roundToInt() * 2).coerceAtLeast(2)
 }
 

@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bbvideoeditor.app.EditorApplication
 import com.bbvideoeditor.app.ui.*
 import com.bbvideoeditor.core.Project
+import kotlinx.coroutines.CancellationException
 import kotlin.math.roundToInt
 
 @Composable
@@ -41,17 +42,19 @@ fun ExportScreen(project: Project, onDismiss: () -> Unit) {
     var capabilityError by remember { mutableStateOf<String?>(null) }
     var openError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(project.canvas) {
-        try { capabilities = ExportCapabilities.inspect(project) }
+        try {
+            val available = ExportCapabilities.inspect(project)
+            capabilities = available
+            settings = settings.supportedFallback(project, available) ?: settings
+        }
+        catch (e: CancellationException) { throw e }
         catch (e: Exception) { capabilityError = "Could not inspect the device encoders: ${e.message}" }
     }
     val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { uri ->
         if (uri != null) exports.start(project, settings.copy(documentUri = uri.toString()))
     }
     val dimensions = settings.dimensions(project)
-    fun supported(candidate: ExportSettings): Boolean {
-        val (w, h) = candidate.dimensions(project)
-        return capabilities?.any { it.codec == candidate.codec && it.width == w && it.height == h && it.frameRate == candidate.frameRate && it.supported } == true
-    }
+    fun supported(candidate: ExportSettings): Boolean = capabilities?.let { candidate.supportedBy(project, it) } == true
     val running = status.active
     val showStatus = status.projectId == project.id || running
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
