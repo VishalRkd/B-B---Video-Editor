@@ -1,0 +1,235 @@
+package com.bbvideoeditor.app.render
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
+import android.util.Pair
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.OverlaySettings
+import androidx.media3.common.VideoCompositorSettings
+import androidx.media3.common.audio.ChannelMixingAudioProcessor
+import androidx.media3.common.audio.ChannelMixingMatrix
+import androidx.media3.common.audio.ToInt16PcmAudioProcessor
+import androidx.media3.common.util.Size
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Presentation
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
+import com.bbvideoeditor.core.Clip
+import com.bbvideoeditor.core.MediaKind
+import com.bbvideoeditor.core.MediaReference
+import com.bbvideoeditor.core.Project
+import com.bbvideoeditor.core.Track
+import com.bbvideoeditor.core.TrackIndex
+import com.bbvideoeditor.core.TrackType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.File
+import kotlin.coroutines.coroutineContext
+
+@UnstableApi
+data class CompiledComposition(
+    val composition: Composition,
+    val durationUs: Long,
+    val warnings: List<String>,
+    val width: Int,
+    val height: Int,
+    val frameRate: Int,
+)
+
+/**
+ * Compiles immutable edit decisions into a Media3 render graph. This is the only translation of
+ * the project into playback/render operations. Compilations never mutate a project or cache
+ * stateful audio processors, so preview and a simultaneous export have independent resources.
+ */
+@UnstableApi
+class CompositionCompiler(
+    context: Context,
+    private val effects: RenderEffectRegistry = RenderEffectRegistry(),
+) {
+    private val context = context.applicationContext
+    private val clockAssetMutex = Mutex()
+
+    suspend fun compile(
+        project: Project,
+        outputWidth: Int = project.canvas.width,
+        outputHeight: Int = project.canvas.height,
+        frameRate: Int = project.canvas.frameRate,
+    ): CompiledComposition = withContext(Dispatchers.Default) {
+        project.validate()
+        require(project.durationUs > 0) { "Add media before previewing or exporting." }
+        require(outputWidth in 2..8192 && outputHeight in 2..8192 && outputWidth % 2 == 0 && outputHeight % 2 == 0)
+        require(frameRate in 1..120)
+        if (project.timeline.transitions.isNotEmpty()) {
+            throw UnsupportedRenderFeature("Transitions in this project require a transition renderer.")
+        }
+        val usedMedia = project.timeline.clips.map { it.mediaId }.toSet()
+        withContext(Dispatchers.IO) {
+            for (id in usedMedia) {
+                coroutineContext.ensureActive()
+                val source = requireNotNull(project.media[id])
+                try {
+                    context.contentResolver.openAssetFileDescriptor(Uri.parse(source.uri), "r")?.use { }
+                        ?: throw IllegalStateException("Cannot open media")
+                } catch (error: Exception) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    throw IllegalArgumentException("'${source.displayName}' is unavailable. Relink or remove it.", error)
+                }
+            }
+        }
+        val clockUri = ensureClockAsset()
+        val visualTracks = project.timeline.tracks
+            .filter { it.type != TrackType.AUDIO && it.clips.isNotEmpty() }
+            .reversed()
+        // Decode audio in dedicated sequences, even when it belongs to a video clip. This avoids
+        // Media3's force-audio initialization race for mixed image/video/silent sequences and
+        // gives every audio stream explicit gaps and the same project timestamps.
+        val audioTracks = project.timeline.tracks.filter { !it.muted }.mapNotNull { track ->
+            val audible = track.clips.filter { project.media[it.mediaId]?.hasAudio == true }
+            if (audible.isEmpty()) null else track.copy(type = TrackType.AUDIO, clips = audible)
+        }
+        val sequenceTracks = visualTracks + audioTracks
+        val sequences = mutableListOf(clockSequence(clockUri, project.durationUs, frameRate))
+        val warnings = mutableListOf<String>()
+        for (track in sequenceTracks) {
+            coroutineContext.ensureActive()
+            val trackTypes = if (track.type == TrackType.AUDIO) setOf(C.TRACK_TYPE_AUDIO) else setOf(C.TRACK_TYPE_VIDEO)
+            val sequence = EditedMediaItemSequence.Builder(trackTypes)
+            var cursorUs = 0L
+            for (clip in track.clips.sortedBy { it.startUs }) {
+                coroutineContext.ensureActive()
+                if (clip.properties.isNotEmpty()) {
+                    throw UnsupportedRenderFeature("Animated clip properties require a property renderer.")
+                }
+                if (clip.startUs > cursorUs) sequence.addGap(clip.startUs - cursorUs)
+                val media = requireNotNull(project.media[clip.mediaId])
+                sequence.addItem(compileClip(clip, media, track, outputWidth, outputHeight, frameRate))
+                cursorUs = clip.endUs
+            }
+            if (cursorUs < project.durationUs) sequence.addGap(project.durationUs - cursorUs)
+            sequences.add(sequence.build())
+        }
+        if (audioTracks.isEmpty()) {
+            sequences.add(EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO)).addGap(project.durationUs).build())
+        }
+        if (visualTracks.size > 3) {
+            warnings += "This project has ${visualTracks.size} visual tracks; playback depends on the device's decoder capacity."
+        }
+        val composition = Composition.Builder(sequences)
+            .setVideoCompositorSettings(ProjectCompositor(visualTracks, outputWidth, outputHeight))
+            .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
+            .build()
+        CompiledComposition(composition, project.durationUs, warnings, outputWidth, outputHeight, frameRate)
+    }
+
+    private fun compileClip(
+        clip: Clip,
+        media: MediaReference,
+        track: Track,
+        width: Int,
+        height: Int,
+        frameRate: Int,
+    ): EditedMediaItem {
+        val item = MediaItem.Builder()
+            .setUri(media.uri)
+            .setMediaId(clip.id)
+        if (media.mimeType.isNotBlank()) item.setMimeType(media.mimeType)
+        val isImage = media.kind == MediaKind.IMAGE
+        // Images have no intrinsic time. Use the same virtual source range as the project.
+        val sourceDurationUs = if (isImage) clip.sourceRange.endUs else media.durationUs
+        if (isImage) item.setImageDurationMs((sourceDurationUs + 999L) / 1000L)
+        item.setClippingConfiguration(
+            MediaItem.ClippingConfiguration.Builder()
+                .setStartPositionUs(clip.sourceRange.startUs)
+                .setEndPositionUs(clip.sourceRange.endUs)
+                .build(),
+        )
+        val audioEffects = mutableListOf<androidx.media3.common.audio.AudioProcessor>()
+        if (track.type == TrackType.AUDIO || (!track.muted && media.hasAudio)) {
+            audioEffects += ToInt16PcmAudioProcessor()
+            audioEffects += ChannelMixingAudioProcessor().apply {
+                for (channels in 1..6) {
+                    putChannelMixingMatrix(ChannelMixingMatrix.createForConstantPower(channels, 2).scaleBy(clip.volume))
+                }
+            }
+        }
+        val videoEffects = mutableListOf<androidx.media3.common.Effect>()
+        if (track.type != TrackType.AUDIO) {
+            videoEffects += Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT)
+        }
+        for (effect in clip.effects.filter { it.enabled }) {
+            val rendered = effects.create(effect, clip, media)
+            audioEffects += rendered.audioProcessors
+            videoEffects += rendered.videoEffects
+        }
+        val builder = EditedMediaItem.Builder(item.build())
+            .setDurationUs(sourceDurationUs)
+            .setFrameRate(frameRate)
+            .setEffects(Effects(audioEffects, videoEffects))
+            .setSpeed(ClipSpeedProvider(clip))
+        if (track.type == TrackType.AUDIO) builder.setRemoveVideo(true)
+        else builder.setRemoveAudio(true)
+        return builder.build()
+    }
+
+    /** The transparent primary sequence supplies deterministic frame cadence and black empty canvas. */
+    private fun clockSequence(uri: Uri, durationUs: Long, frameRate: Int): EditedMediaItemSequence {
+        val item = MediaItem.Builder()
+            .setUri(uri)
+            .setMimeType(MimeTypes.IMAGE_PNG)
+            .setImageDurationMs((durationUs + 999) / 1000)
+            .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder().setEndPositionUs(durationUs).build())
+            .build()
+        return EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_VIDEO))
+            .addItem(EditedMediaItem.Builder(item).setDurationUs(durationUs).setFrameRate(frameRate).setRemoveAudio(true).build())
+            .build()
+    }
+
+    private suspend fun ensureClockAsset(): Uri = withContext(Dispatchers.IO) {
+        clockAssetMutex.withLock {
+            val folder = File(context.filesDir, "render").apply { mkdirs() }
+            val file = File(folder, "transparent-clock.png")
+            if (!file.exists()) {
+                val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+                try {
+                    val temporary = File(folder, "transparent-clock.tmp")
+                    temporary.outputStream().use { stream ->
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
+                    }
+                    check(temporary.renameTo(file)) { "Cannot create the render canvas." }
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+            Uri.fromFile(file)
+        }
+    }
+}
+
+/** Input 0 is the clock; visual inputs 1..n are registered from topmost layer to bottommost. */
+@UnstableApi
+private class ProjectCompositor(tracks: List<Track>, private val width: Int, private val height: Int) : VideoCompositorSettings {
+    private val indices = tracks.map(::TrackIndex)
+    private val hidden = object : OverlaySettings { override fun getAlphaScale(): Float = 0f }
+
+    override fun getOutputSize(inputSizes: MutableList<Size>): Size = Size(width, height)
+
+    override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
+        if (inputId == 0) return hidden
+        val clip = indices.getOrNull(inputId - 1)?.clipAt(presentationTimeUs) ?: return hidden
+        val transform = clip.transform
+        return object : OverlaySettings {
+            override fun getAlphaScale(): Float = transform.opacity
+            override fun getScale(): Pair<Float, Float> = Pair.create(transform.scaleX, transform.scaleY)
+            override fun getRotationDegrees(): Float = transform.rotationDegrees
+            override fun getBackgroundFrameAnchor(): Pair<Float, Float> = Pair.create(transform.translationX, transform.translationY)
+        }
+    }
+}
