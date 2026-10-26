@@ -68,11 +68,13 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
         app.projects.rememberLastProject(project.id)
     }
 
-    fun flush() = viewModelScope.launch {
-        val project = state.value.editor?.committedProject ?: return@launch
-        saveJob?.cancelAndJoin()
-        try { app.projects.save(project) }
-        catch (e: Exception) { if (e is CancellationException) throw e; state.value.editor?.message("Could not save: ${e.message}") }
+    fun flush() {
+        val project = state.value.editor?.committedProject ?: return
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch {
+            try { app.projects.save(project) }
+            catch (e: Exception) { if (e is CancellationException) throw e; state.value.editor?.message("Could not save: ${e.message}") }
+        }
     }
 
     fun closeEditor() = viewModelScope.launch {

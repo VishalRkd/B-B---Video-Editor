@@ -51,7 +51,7 @@ fun EditorScreen(
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); editor.message(null) } }
 
     Scaffold(containerColor = Ink, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to projects") }
                 TextButton(onClick = { showRename = true }, modifier = Modifier.weight(1f)) {

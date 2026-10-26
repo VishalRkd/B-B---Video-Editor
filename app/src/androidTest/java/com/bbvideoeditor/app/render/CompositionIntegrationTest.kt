@@ -116,7 +116,15 @@ class CompositionIntegrationTest {
         var last = Color.TRANSPARENT
         await("preview color ${Integer.toHexString(expected)}") {
             val bitmap = screenshot(view) ?: return@await false
-            try { last = bitmap.getPixel((bitmap.width * x).toInt(), (bitmap.height * y).toInt()) }
+            try {
+                // SurfaceView can retain full-view dimensions while the graph letterboxes its
+                // 16:9 composition. Sample composition coordinates, not the surrounding bars.
+                val contentWidth = minOf(bitmap.width.toFloat(), bitmap.height * 16f / 9f)
+                val contentHeight = contentWidth * 9f / 16f
+                val px = ((bitmap.width - contentWidth) / 2f + contentWidth * x).toInt()
+                val py = ((bitmap.height - contentHeight) / 2f + contentHeight * y).toInt()
+                last = bitmap.getPixel(px, py)
+            }
             finally { bitmap.recycle() }
             val redCorrect = kotlin.math.abs(Color.red(last) - Color.red(expected)) < 65
             val greenCorrect = kotlin.math.abs(Color.green(last) - Color.green(expected)) < 65

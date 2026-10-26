@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -46,7 +47,10 @@ class MainActivity : ComponentActivity() {
     private var workspace: WorkspaceViewModel? = null
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         setContent {
             EditorTheme {
                 val model: WorkspaceViewModel = viewModel()
@@ -112,7 +116,12 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
     LaunchedEffect(exporting) { if (exporting) engine.suspendPlayback() else engine.resume() }
     DisposableEffect(engine, lifecycle) {
         editor.onSeek = engine::seek
-        editor.onPlayingChanged = { playing -> if (playing) engine.play() else engine.pause() }
+        editor.onPlayingChanged = { playing ->
+            if (playing && currentlyExporting) {
+                editor.updatePlayback(editor.state.value.positionUs, false)
+                editor.message("Preview is paused while the export finishes.")
+            } else if (playing) engine.play() else engine.pause()
+        }
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> if (!currentlyExporting) engine.resume()

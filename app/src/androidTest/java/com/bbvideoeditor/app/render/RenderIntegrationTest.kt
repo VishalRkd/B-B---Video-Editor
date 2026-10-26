@@ -9,6 +9,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bbvideoeditor.app.export.ExportSettings
 import com.bbvideoeditor.app.export.Media3RenderEngine
+import com.bbvideoeditor.app.media.MediaImporter
+import com.bbvideoeditor.app.media.WaveformRepository
+import android.net.Uri
 import com.bbvideoeditor.core.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -67,6 +70,10 @@ class RenderIntegrationTest {
         assertTrue("Video begins at ${videoRange.first}", videoRange.first in 0..40_000)
         assertTrue("Audio begins at ${audioRange.first}", audioRange.first in -40_000..40_000)
         assertTrue("A/V tails diverged: $videoRange $audioRange", kotlin.math.abs(videoRange.second - audioRange.second) < 70_000)
+        val exportedMedia = MediaImporter(context).importMedia(listOf(Uri.fromFile(output))).media.single()
+        val peaks = WaveformRepository(context).waveform(exportedMedia, 100)
+        val maximum = peaks.maxOrNull() ?: 0f
+        assertTrue("Half-volume audio was not applied: peak=$maximum", maximum in .04f.. .09f)
     }
 
     private fun assertColor(retriever: MediaMetadataRetriever, timeUs: Long, x: Float, y: Float, expected: Int) {

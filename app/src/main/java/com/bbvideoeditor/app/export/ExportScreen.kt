@@ -61,7 +61,7 @@ fun ExportScreen(project: Project, onDismiss: () -> Unit) {
                     Text("Export video", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                     Text(project.name, fontSize = 12.sp, color = Muted)
                 }
-                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close export") }
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Close export", tint = MaterialTheme.colorScheme.onSurface) }
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 Surface(color = Panel, shape = RoundedCornerShape(16.dp)) {

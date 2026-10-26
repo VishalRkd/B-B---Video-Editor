@@ -13,6 +13,7 @@ import androidx.media3.transformer.CompositionPlayer
 import com.bbvideoeditor.app.render.CompositionCompiler
 import com.bbvideoeditor.core.Project
 import com.bbvideoeditor.core.TrackIndex
+import com.bbvideoeditor.core.TrackType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,11 +61,13 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
     private var requestedPlaying = false
     private var seekingUntilMs = 0L
     private var segmentIds: List<String?> = emptyList()
+    private var visualIndices: List<TrackIndex> = emptyList()
 
     fun updateProject(project: Project) {
         checkMainThread()
         if (this.project == project) return
         this.project = project
+        visualIndices = project.timeline.tracks.filter { it.type != TrackType.AUDIO }.map(::TrackIndex)
         mutableState.value = state.value.copy(positionUs = state.value.positionUs.coerceIn(0, project.durationUs))
         if (active) compileProject()
     }
@@ -105,7 +108,7 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
         mutableState.value = state.value.copy(positionUs = targetUs)
         // Keep the UI at the requested time while the decoder catches up. Player positions are ms.
         seekingUntilMs = android.os.SystemClock.elapsedRealtime() + 150
-        val targetSegments = project?.timeline?.tracks?.map { TrackIndex(it).clipAt(targetUs)?.id }.orEmpty()
+        val targetSegments = visualIndices.map { it.clipAt(targetUs)?.id }
         if (targetSegments != segmentIds && active) {
             // Media3 1.11 can retain a prewarmed decoder's old frame after a paused period
             // crossing. Recreate at the requested project position only at clip/gap boundaries.
@@ -178,7 +181,7 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
                 if (generation != revision || !active) return@launch
                 val output = player ?: createPlayer().also { player = it }
                 appliedGeneration = revision
-                segmentIds = snapshot.timeline.tracks.map { TrackIndex(it).clipAt(state.value.positionUs)?.id }
+                segmentIds = visualIndices.map { it.clipAt(state.value.positionUs)?.id }
                 output.setComposition(compiled.composition, state.value.positionUs / 1000)
                 output.prepare()
                 mutableState.value = state.value.copy(player = output, warnings = compiled.warnings, error = null)
@@ -236,6 +239,16 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
         val old = state.value
         val positionUs = if (android.os.SystemClock.elapsedRealtime() < seekingUntilMs) old.positionUs
         else output.currentPosition.times(1000).coerceIn(0, project?.durationUs ?: 0)
+        val snapshot = project
+        if (output.isPlaying && snapshot != null && positionUs < snapshot.durationUs) {
+            val nextSegments = visualIndices.map { it.clipAt(positionUs)?.id }
+            if (nextSegments != segmentIds) {
+                // Apply the same boundary reset during playback. All streams restart together
+                // at one project time, preserving A/V sync rather than showing a stale layer.
+                seek(positionUs)
+                return
+            }
+        }
         mutableState.value = old.copy(
             positionUs = positionUs,
             playing = output.isPlaying,
