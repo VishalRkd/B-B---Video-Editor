@@ -9,6 +9,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.MultipleInputVideoGraph
+import androidx.media3.effect.SingleInputVideoGraph
 import androidx.media3.transformer.CompositionPlayer
 import com.bbvideoeditor.app.render.CompositionCompiler
 import com.bbvideoeditor.core.Project
@@ -30,10 +31,12 @@ import kotlinx.coroutines.launch
 data class PreviewState(
     val positionUs: Long = 0,
     val playing: Boolean = false,
+    val playWhenReady: Boolean = false,
     val buffering: Boolean = false,
     val error: String? = null,
     val player: Player? = null,
     val warnings: List<String> = emptyList(),
+    val quality: PreviewQuality = PreviewQuality.BALANCED,
 )
 
 /**
@@ -44,10 +47,15 @@ data class PreviewState(
 @UnstableApi
 @androidx.annotation.OptIn(androidx.media3.common.util.ExperimentalApi::class)
 @MainThread
-class PreviewEngine(context: Context, private val compiler: CompositionCompiler) : AutoCloseable {
+class PreviewEngine(
+    context: Context,
+    private val compiler: CompositionCompiler,
+    initialPositionUs: Long = 0,
+    initialQuality: PreviewQuality = PreviewQuality.BALANCED,
+) : AutoCloseable {
     private val context = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val mutableState = MutableStateFlow(PreviewState())
+    private val mutableState = MutableStateFlow(PreviewState(positionUs = initialPositionUs.coerceAtLeast(0), quality = initialQuality))
     val state: StateFlow<PreviewState> = mutableState.asStateFlow()
     private var player: CompositionPlayer? = null
     private var project: Project? = null
@@ -62,13 +70,23 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
     private var seekingUntilMs = 0L
     private var segmentIds: List<String?> = emptyList()
     private var visualIndices: List<TrackIndex> = emptyList()
+    private var requiresCompositor = true
+    private var configuringPlayer = false
 
     fun updateProject(project: Project) {
         checkMainThread()
+        if (closed) return
         if (this.project == project) return
         this.project = project
         visualIndices = project.timeline.tracks.filter { it.type != TrackType.AUDIO }.map(::TrackIndex)
         mutableState.value = state.value.copy(positionUs = state.value.positionUs.coerceIn(0, project.durationUs))
+        if (active) compileProject()
+    }
+
+    fun setQuality(quality: PreviewQuality) {
+        checkMainThread()
+        if (closed || state.value.quality == quality) return
+        mutableState.value = state.value.copy(quality = quality)
         if (active) compileProject()
     }
 
@@ -83,9 +101,9 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
     fun play() {
         checkMainThread()
         if (!active || closed || (project?.durationUs ?: 0) == 0L) return
+        stopScrubbing()
         requestedPlaying = true
-        scrubJob?.cancel()
-        player?.setScrubbingModeEnabled(false)
+        mutableState.value = state.value.copy(playWhenReady = true)
         if (state.value.positionUs >= (project?.durationUs ?: 0)) seek(0)
         if (state.value.error != null) {
             compileProject()
@@ -96,20 +114,22 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
 
     fun pause() {
         checkMainThread()
+        stopScrubbing()
         requestedPlaying = false
         player?.pause()
-        mutableState.value = state.value.copy(playing = false)
+        mutableState.value = state.value.copy(playing = false, playWhenReady = false)
     }
 
     fun seek(positionUs: Long) {
         checkMainThread()
+        if (closed) return
         val durationUs = project?.durationUs ?: 0L
         val targetUs = positionUs.coerceIn(0L, durationUs)
         mutableState.value = state.value.copy(positionUs = targetUs)
         // Keep the UI at the requested time while the decoder catches up. Player positions are ms.
         seekingUntilMs = android.os.SystemClock.elapsedRealtime() + 150
         val targetSegments = visualIndices.map { it.clipAt(targetUs)?.id }
-        if (targetSegments != segmentIds && active) {
+        if (requiresCompositor && targetSegments != segmentIds && active) {
             // Media3 1.11 can retain a prewarmed decoder's old frame after a paused period
             // crossing. Recreate at the requested project position only at clip/gap boundaries.
             // In-clip scrubbing retains the graph; the debounce coalesces fast boundary crossings.
@@ -119,13 +139,24 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
             compileProject()
             return
         }
+        segmentIds = targetSegments
         if (appliedGeneration == generation) player?.let { output ->
-            output.setScrubbingModeEnabled(true)
+            // Native scrubbing mode temporarily changes playWhenReady and restores its previous
+            // value on exit. Use it only for paused scrubs, not seeks during requested playback.
+            if (requestedPlaying) stopScrubbing() else {
+                // At STATE_ENDED the native player may still have playWhenReady=true. Clear it
+                // before entering scrub mode so a paused seek cannot resurrect playback.
+                output.pause()
+                output.setScrubbingModeEnabled(true)
+            }
             output.seekTo(targetUs / 1000L)
             scrubJob?.cancel()
-            scrubJob = scope.launch {
+            scrubJob = if (requestedPlaying) null else scope.launch {
                 delay(180)
-                if (player === output) output.setScrubbingModeEnabled(false)
+                if (player === output) {
+                    output.setScrubbingModeEnabled(false)
+                    if (!requestedPlaying) output.pause()
+                }
             }
         }
     }
@@ -138,11 +169,14 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
         generation++
         compileJob?.cancel()
         compileJob = null
-        val positionUs = if (appliedGeneration == generation - 1) player?.currentPosition?.times(1000) else null
+        val positionUs = if (appliedGeneration == generation - 1 && android.os.SystemClock.elapsedRealtime() >= seekingUntilMs) {
+            player?.currentPosition?.times(1000)
+        } else null
         releasePlayer()
         mutableState.value = state.value.copy(
             player = null,
             playing = false,
+            playWhenReady = false,
             buffering = false,
             positionUs = (positionUs ?: state.value.positionUs).coerceIn(0, project?.durationUs ?: 0),
         )
@@ -162,10 +196,12 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
         val snapshot = project ?: return
         val revision = ++generation
         compileJob?.cancel()
+        stopScrubbing()
         player?.pause()
         if (snapshot.durationUs == 0L) {
+            requestedPlaying = false
             releasePlayer()
-            mutableState.value = PreviewState()
+            mutableState.value = PreviewState(quality = state.value.quality)
             return
         }
         mutableState.value = state.value.copy(playing = false, buffering = true, error = null)
@@ -174,18 +210,23 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
                 // Coalesce continuous trim/drag edits before allocating another decoder graph.
                 delay(60)
                 // Lower preview resolution reduces GPU memory without changing aspect or edits.
-                val ratio = minOf(1.0, 1280.0 / maxOf(snapshot.canvas.width, snapshot.canvas.height))
-                val width = ((snapshot.canvas.width * ratio).toInt() / 2 * 2).coerceAtLeast(2)
-                val height = ((snapshot.canvas.height * ratio).toInt() / 2 * 2).coerceAtLeast(2)
-                val compiled = compiler.compile(snapshot, width, height)
+                val (width, height) = state.value.quality.dimensions(snapshot.canvas)
+                val compiled = compiler.compile(snapshot, width, height, preferSingleVisualInput = true)
                 if (generation != revision || !active) return@launch
+                // Legacy multi-input graphs cannot reliably flush their compositor queues after
+                // edits. Single-input graphs can be updated in place; layered graphs start fresh.
+                if (player != null && (requiresCompositor || requiresCompositor != compiled.requiresCompositor)) releasePlayer()
+                requiresCompositor = compiled.requiresCompositor
                 val output = player ?: createPlayer().also { player = it }
                 appliedGeneration = revision
                 segmentIds = visualIndices.map { it.clipAt(state.value.positionUs)?.id }
-                output.setComposition(compiled.composition, state.value.positionUs / 1000)
-                output.prepare()
-                mutableState.value = state.value.copy(player = output, warnings = compiled.warnings, error = null)
-                if (requestedPlaying) output.play()
+                configuringPlayer = true
+                try {
+                    output.setComposition(compiled.composition, state.value.positionUs / 1000)
+                    output.prepare()
+                    mutableState.value = state.value.copy(player = output, warnings = compiled.warnings, error = null)
+                    if (requestedPlaying) output.play()
+                } finally { configuringPlayer = false }
                 startClock()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -196,7 +237,7 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
     }
 
     private fun createPlayer(): CompositionPlayer = CompositionPlayer.Builder(context)
-        .setVideoGraphFactory(MultipleInputVideoGraph.Factory())
+        .setVideoGraphFactory(if (requiresCompositor) MultipleInputVideoGraph.Factory() else SingleInputVideoGraph.Factory())
         .setPerStreamMediaProgressionEnabled(true)
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
@@ -204,18 +245,20 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
         )
         .build()
         .apply {
+            val owner = this
             addListener(object : Player.Listener {
                 override fun onEvents(player: Player, events: Player.Events) {
-                    if (appliedGeneration != generation || !active) return
+                    if (player !== this@PreviewEngine.player || configuringPlayer || appliedGeneration != generation || !active) return
                     if (player.playbackState == Player.STATE_ENDED) requestedPlaying = false
+                    else if (events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED)) requestedPlaying = player.playWhenReady
                     publishPlayerState()
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
-                    if (appliedGeneration == generation && active) {
+                    if (owner === this@PreviewEngine.player && appliedGeneration == generation && active) {
                         requestedPlaying = false
                         mutableState.value = state.value.copy(
-                            playing = false, buffering = false,
+                            playing = false, playWhenReady = false, buffering = false,
                             error = "Preview failed (${error.errorCodeName}). ${error.cause?.message ?: error.message.orEmpty()}",
                         )
                     }
@@ -239,12 +282,11 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
         val old = state.value
         val positionUs = if (android.os.SystemClock.elapsedRealtime() < seekingUntilMs) old.positionUs
         else output.currentPosition.times(1000).coerceIn(0, project?.durationUs ?: 0)
-        val snapshot = project
-        if (output.isPlaying && snapshot != null && positionUs < snapshot.durationUs) {
+        if (requiresCompositor && output.isPlaying && positionUs < (project?.durationUs ?: 0)) {
             val nextSegments = visualIndices.map { it.clipAt(positionUs)?.id }
             if (nextSegments != segmentIds) {
-                // Apply the same boundary reset during playback. All streams restart together
-                // at one project time, preserving A/V sync rather than showing a stale layer.
+                // Retain the verified fallback for layered/transformed compositions. Simple
+                // sequences use a single-input graph and keep their decoder across boundaries.
                 seek(positionUs)
                 return
             }
@@ -252,6 +294,7 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
         mutableState.value = old.copy(
             positionUs = positionUs,
             playing = output.isPlaying,
+            playWhenReady = requestedPlaying,
             buffering = output.playbackState == Player.STATE_BUFFERING,
         )
     }
@@ -259,7 +302,13 @@ class PreviewEngine(context: Context, private val compiler: CompositionCompiler)
     private fun fail(message: String) {
         requestedPlaying = false
         releasePlayer()
-        mutableState.value = state.value.copy(player = null, playing = false, buffering = false, error = message)
+        mutableState.value = state.value.copy(player = null, playing = false, playWhenReady = false, buffering = false, error = message)
+    }
+
+    private fun stopScrubbing() {
+        scrubJob?.cancel()
+        scrubJob = null
+        player?.setScrubbingModeEnabled(false)
     }
 
     private fun releasePlayer() {

@@ -26,6 +26,7 @@ import com.bbvideoeditor.core.Project
 import com.bbvideoeditor.core.Track
 import com.bbvideoeditor.core.TrackIndex
 import com.bbvideoeditor.core.TrackType
+import com.bbvideoeditor.core.Transform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -42,6 +43,7 @@ data class CompiledComposition(
     val width: Int,
     val height: Int,
     val frameRate: Int,
+    val requiresCompositor: Boolean = true,
 )
 
 /**
@@ -62,6 +64,7 @@ class CompositionCompiler(
         outputWidth: Int = project.canvas.width,
         outputHeight: Int = project.canvas.height,
         frameRate: Int = project.canvas.frameRate,
+        preferSingleVisualInput: Boolean = false,
     ): CompiledComposition = withContext(Dispatchers.Default) {
         project.validate()
         require(project.durationUs > 0) { "Add media before previewing or exporting." }
@@ -84,10 +87,19 @@ class CompositionCompiler(
                 }
             }
         }
-        val clockUri = ensureClockAsset()
         val visualTracks = project.timeline.tracks
             .filter { it.type != TrackType.AUDIO && it.clips.isNotEmpty() }
             .reversed()
+        val visualClips = visualTracks.flatMap { it.clips }.sortedBy { it.startUs }
+        // With no simultaneous layers or compositor-only edits, all visual clips can share one
+        // decoder sequence. Keep this an explicit preview optimization: export still uses the
+        // clock-backed graph, and projects needing composition retain their original layer order.
+        val useSingleVisualInput = preferSingleVisualInput && visualClips.isNotEmpty() &&
+            visualClips.all { it.transform == Transform() && it.effects.none { effect -> effect.enabled } } &&
+            visualClips.zipWithNext().all { (previous, next) -> previous.endUs <= next.startUs }
+        val compiledVisualTracks = if (useSingleVisualInput) {
+            listOf(visualTracks.first().copy(clips = visualClips))
+        } else visualTracks
         // Decode audio in dedicated sequences, even when it belongs to a video clip. This avoids
         // Media3's force-audio initialization race for mixed image/video/silent sequences and
         // gives every audio stream explicit gaps and the same project timestamps.
@@ -95,8 +107,9 @@ class CompositionCompiler(
             val audible = track.clips.filter { project.media[it.mediaId]?.hasAudio == true }
             if (audible.isEmpty()) null else track.copy(type = TrackType.AUDIO, clips = audible)
         }
-        val sequenceTracks = visualTracks + audioTracks
-        val sequences = mutableListOf(clockSequence(clockUri, project.durationUs, frameRate))
+        val sequenceTracks = compiledVisualTracks + audioTracks
+        val sequences = mutableListOf<EditedMediaItemSequence>()
+        if (!useSingleVisualInput) sequences.add(clockSequence(ensureClockAsset(), project.durationUs, frameRate))
         val warnings = mutableListOf<String>()
         for (track in sequenceTracks) {
             coroutineContext.ensureActive()
@@ -119,14 +132,24 @@ class CompositionCompiler(
         if (audioTracks.isEmpty()) {
             sequences.add(EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO)).addGap(project.durationUs).build())
         }
-        if (visualTracks.size > 3) {
+        if (!useSingleVisualInput && visualTracks.size > 3) {
             warnings += "This project has ${visualTracks.size} visual tracks; playback depends on the device's decoder capacity."
         }
-        val composition = Composition.Builder(sequences)
-            .setVideoCompositorSettings(ProjectCompositor(visualTracks, outputWidth, outputHeight))
+        val compositionBuilder = Composition.Builder(sequences)
             .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
-            .build()
-        CompiledComposition(composition, project.durationUs, warnings, outputWidth, outputHeight, frameRate)
+        if (useSingleVisualInput) {
+            // Native video gaps decode as small black bitmaps. Apply the output canvas after
+            // every item, including gaps, without requiring a second visual clock input.
+            compositionBuilder.setEffects(Effects(emptyList(), listOf(
+                Presentation.createForWidthAndHeight(outputWidth, outputHeight, Presentation.LAYOUT_SCALE_TO_FIT),
+            )))
+        } else {
+            compositionBuilder.setVideoCompositorSettings(ProjectCompositor(visualTracks, outputWidth, outputHeight))
+        }
+        CompiledComposition(
+            compositionBuilder.build(), project.durationUs, warnings, outputWidth, outputHeight, frameRate,
+            requiresCompositor = !useSingleVisualInput,
+        )
     }
 
     private fun compileClip(

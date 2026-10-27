@@ -12,6 +12,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,6 +35,7 @@ import com.bbvideoeditor.app.editor.EditorScreen
 import com.bbvideoeditor.app.editor.EditorViewModel
 import com.bbvideoeditor.app.editor.EmptyPreview
 import com.bbvideoeditor.app.playback.PreviewEngine
+import com.bbvideoeditor.app.playback.PreviewQuality
 import com.bbvideoeditor.app.projects.ProjectsScreen
 import com.bbvideoeditor.app.projects.WorkspaceViewModel
 import com.bbvideoeditor.app.export.ExportScreen
@@ -106,14 +108,26 @@ private fun Workspace(workspace: WorkspaceViewModel) {
 @Composable
 private fun EditorSession(editor: EditorViewModel, app: EditorApplication, importing: Boolean, exporting: Boolean,
                           onBack: () -> Unit, onImport: (TrackType) -> Unit, onExport: () -> Unit) {
-    val engine = remember(editor) { PreviewEngine(app, app.compiler) }
+    val preferences = remember(app) { app.getSharedPreferences("preview", android.content.Context.MODE_PRIVATE) }
+    var quality by rememberSaveable {
+        mutableStateOf(PreviewQuality.entries.firstOrNull { it.name == preferences.getString("quality", null) } ?: PreviewQuality.BALANCED)
+    }
+    var qualityMenu by remember { mutableStateOf(false) }
+    val engine = remember(editor) {
+        PreviewEngine(app, app.compiler, initialPositionUs = editor.state.value.positionUs, initialQuality = quality)
+    }
     val state by editor.state.collectAsStateWithLifecycle()
     val playback by engine.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val currentlyExporting by rememberUpdatedState(exporting)
     LaunchedEffect(state.project) { engine.updateProject(state.project) }
-    LaunchedEffect(playback.positionUs, playback.playing) { editor.updatePlayback(playback.positionUs, playback.playing) }
-    LaunchedEffect(exporting) { if (exporting) engine.suspendPlayback() else engine.resume() }
+    // Transport intent keeps Pause available while the requested playback is buffering.
+    LaunchedEffect(playback.positionUs, playback.playWhenReady) { editor.updatePlayback(playback.positionUs, playback.playWhenReady) }
+    LaunchedEffect(quality) { engine.setQuality(quality) }
+    LaunchedEffect(exporting) {
+        if (exporting || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) engine.suspendPlayback()
+        else engine.resume()
+    }
     DisposableEffect(engine, lifecycle) {
         editor.onSeek = engine::seek
         editor.onPlayingChanged = { playing ->
@@ -125,13 +139,21 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> if (!currentlyExporting) engine.resume()
-                Lifecycle.Event.ON_STOP -> engine.suspendPlayback()
+                Lifecycle.Event.ON_STOP -> {
+                    engine.suspendPlayback()
+                    editor.updatePlayback(engine.state.value.positionUs, false)
+                }
                 else -> Unit
             }
         }
         lifecycle.addObserver(observer)
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && !exporting) engine.resume()
-        onDispose { lifecycle.removeObserver(observer); editor.onSeek = {}; editor.onPlayingChanged = {}; engine.close() }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            editor.onSeek = {}; editor.onPlayingChanged = {}
+            engine.close()
+            editor.updatePlayback(engine.state.value.positionUs, false)
+        }
     }
     EditorScreen(editor, app.thumbnails, importing, onBack, onImport, onExport, preview = { modifier ->
         Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
@@ -147,6 +169,23 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
                             Text(error, fontSize = 12.sp)
                             TextButton(onClick = { engine.updateProject(state.project); engine.resume() }) { Text("Retry preview") }
                         }
+                    }
+                }
+                Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
+                    Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
+                        TextButton(onClick = { qualityMenu = true }) {
+                            Text("Preview · ${quality.label}", color = Color.White, fontSize = 11.sp)
+                        }
+                    }
+                    DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
+                        PreviewQuality.entries.forEach { option ->
+                            DropdownMenuItem(text = { Text(option.label) }, onClick = {
+                                quality = option
+                                preferences.edit().putString("quality", option.name).apply()
+                                qualityMenu = false
+                            })
+                        }
+                        Text("Preview detail only. Export uses its own settings.", Modifier.padding(12.dp), fontSize = 11.sp)
                     }
                 }
             }
