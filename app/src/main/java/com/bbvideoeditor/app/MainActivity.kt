@@ -34,6 +34,7 @@ import androidx.media3.ui.PlayerView
 import com.bbvideoeditor.app.editor.EditorScreen
 import com.bbvideoeditor.app.editor.EditorViewModel
 import com.bbvideoeditor.app.editor.EmptyPreview
+import com.bbvideoeditor.app.editor.TextCanvasLayer
 import com.bbvideoeditor.app.playback.PreviewEngine
 import com.bbvideoeditor.app.playback.PreviewQuality
 import com.bbvideoeditor.app.projects.ProjectsScreen
@@ -114,7 +115,7 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
     }
     var qualityMenu by remember { mutableStateOf(false) }
     val engine = remember(editor) {
-        PreviewEngine(app, app.compiler, initialPositionUs = editor.state.value.positionUs, initialQuality = quality)
+        PreviewEngine(app, app.compiler, initialPositionUs = editor.state.value.positionUs, initialQuality = quality, renderTextInPlayer = false)
     }
     val state by editor.state.collectAsStateWithLifecycle()
     val playback by engine.state.collectAsStateWithLifecycle()
@@ -162,6 +163,7 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
                 AndroidView(factory = { context ->
                     PlayerView(context).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER); setShutterBackgroundColor(android.graphics.Color.BLACK) }
                 }, update = { it.player = playback.player }, onRelease = { it.player = null }, modifier = Modifier.fillMaxSize())
+                TextCanvasLayer(editor, app.textBitmaps, Modifier.fillMaxSize())
                 if (playback.buffering) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
                 playback.error?.let { error ->
                     Surface(color = Panel.copy(alpha = .96f), modifier = Modifier.padding(16.dp)) {
@@ -190,5 +192,5 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
                 }
             }
         }
-    }, waveforms = app.waveforms)
+    }, waveforms = app.waveforms, textBitmaps = app.textBitmaps)
 }

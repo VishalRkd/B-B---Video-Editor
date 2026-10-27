@@ -5,7 +5,7 @@ import java.util.UUID
 import kotlin.math.roundToLong
 
 const val MICROS_PER_SECOND: Long = 1_000_000L
-const val CURRENT_PROJECT_SCHEMA = 1
+const val CURRENT_PROJECT_SCHEMA = 2
 
 fun newId(): String = UUID.randomUUID().toString()
 
@@ -122,7 +122,7 @@ data class TransitionSpec(
 @Serializable
 data class Clip(
     val id: String = newId(),
-    val mediaId: String,
+    val mediaId: String? = null,
     val startUs: Long,
     val sourceRange: TimeRange,
     val speed: Float = 1f,
@@ -134,9 +134,13 @@ data class Clip(
     val durationOverrideUs: Long? = null,
     /** Carries fractional source microseconds through repeated splits, preventing cumulative drift. */
     val sourceRoundingOffsetUs: Double = 0.0,
+    val text: TextContent? = null,
 ) {
     init {
-        require(id.isNotBlank() && mediaId.isNotBlank())
+        require(id.isNotBlank())
+        require((mediaId != null) != (text != null)) { "A clip must contain either media or text" }
+        require(mediaId == null || mediaId.isNotBlank())
+        require(text == null || (speed == 1f && volume == 1f)) { "Text uses its timeline duration directly" }
         require(startUs >= 0) { "A clip cannot start before the timeline" }
         require(speed.isFinite() && speed in 0.1f..8f) { "Speed must be between 0.1 and 8" }
         require(volume.isFinite() && volume in 0f..4f) { "Volume must be between 0 and 4" }
@@ -162,9 +166,10 @@ enum class TrackType {
     fun accepts(kind: MediaKind): Boolean = when (this) {
         VIDEO, OVERLAY -> kind == MediaKind.VIDEO || kind == MediaKind.IMAGE
         AUDIO -> kind == MediaKind.AUDIO || kind == MediaKind.VIDEO
-        // Reserved for a future text-content adapter, never treated as an image or video track.
         TEXT -> false
     }
+    fun accepts(clip: Clip, media: Map<String, MediaReference>): Boolean =
+        if (clip.text != null) this == TEXT else media[clip.mediaId]?.let { accepts(it.kind) } == true
 }
 
 @Serializable
@@ -221,6 +226,13 @@ data class Project(
     fun findTrackForClip(id: String): Track? = timeline.tracks.firstOrNull { track -> track.clips.any { it.id == id } }
     fun findTrack(id: String): Track? = timeline.tracks.firstOrNull { it.id == id }
 
+    /** Version 1 contains only media clips; their source timing is unchanged by this migration. */
+    fun upgradeSchema(): Project {
+        require(schemaVersion in 1..CURRENT_PROJECT_SCHEMA) { "Unsupported project schema $schemaVersion" }
+        if (schemaVersion == 1) require(timeline.clips.none { it.text != null }) { "Text is not supported by schema 1" }
+        return copy(schemaVersion = CURRENT_PROJECT_SCHEMA).validate()
+    }
+
     /** Validate at the persistence and command boundaries. No overlapping clips on one track. */
     fun validate(): Project {
         require(schemaVersion == CURRENT_PROJECT_SCHEMA) { "Unsupported project schema $schemaVersion" }
@@ -234,10 +246,12 @@ data class Project(
             val ordered = track.clips.sortedBy { it.startUs }
             ordered.forEach { clip ->
                 require(seen.add(clip.id)) { "Duplicate clip ID" }
-                val source = requireNotNull(media[clip.mediaId]) { "Clip references unknown media ${clip.mediaId}" }
-                require(track.type.accepts(source.kind)) { "${source.kind} is incompatible with ${track.type}" }
-                if (source.kind != MediaKind.IMAGE) {
-                    require(clip.sourceRange.endUs <= source.durationUs) { "Trim extends beyond source media" }
+                require(track.type.accepts(clip, media)) { "Clip is incompatible with ${track.type}" }
+                if (clip.text == null) {
+                    val source = requireNotNull(media[clip.mediaId]) { "Clip references unknown media ${clip.mediaId}" }
+                    if (source.kind != MediaKind.IMAGE) {
+                        require(clip.sourceRange.endUs <= source.durationUs) { "Trim extends beyond source media" }
+                    }
                 }
             }
             require(ordered.zipWithNext().all { (left, right) -> left.endUs <= right.startUs }) {

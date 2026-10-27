@@ -1,6 +1,7 @@
 package com.bbvideoeditor.app.export
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.*
@@ -22,7 +23,7 @@ class Media3RenderEngine(context: Context, private val compiler: CompositionComp
                        onProgress: (Int?) -> Unit = {}, onDetail: (String) -> Unit = {}): RenderResult {
         val (width, height) = settings.dimensions(project)
         val plan = compiler.compile(project, width, height, settings.frameRate)
-        return withContext(Dispatchers.Main.immediate) {
+        val result = withContext(Dispatchers.Main.immediate) {
             coroutineScope {
                 var transformer: Transformer? = null
                 var polling: Job? = null
@@ -61,6 +62,19 @@ class Media3RenderEngine(context: Context, private val compiler: CompositionComp
                     }
                 } finally { polling?.cancel(); transformer?.cancel() }
             }
+        }
+        // Media3 normally encodes portrait frames sideways for codec compatibility and writes
+        // MP4 rotation metadata. Report the displayed dimensions, including encoder fallbacks.
+        return withContext(Dispatchers.IO) {
+            val metadata = MediaMetadataRetriever()
+            try {
+                metadata.setDataSource(output.absolutePath)
+                val encodedWidth = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: result.width
+                val encodedHeight = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: result.height
+                val rotation = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if (rotation % 180 != 0) result.copy(width = encodedHeight, height = encodedWidth)
+                else result.copy(width = encodedWidth, height = encodedHeight)
+            } finally { metadata.release() }
         }
     }
 }

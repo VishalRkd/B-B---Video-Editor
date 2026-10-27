@@ -52,6 +52,7 @@ class PreviewEngine(
     private val compiler: CompositionCompiler,
     initialPositionUs: Long = 0,
     initialQuality: PreviewQuality = PreviewQuality.BALANCED,
+    private val renderTextInPlayer: Boolean = true,
 ) : AutoCloseable {
     private val context = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -77,9 +78,16 @@ class PreviewEngine(
         checkMainThread()
         if (closed) return
         if (this.project == project) return
+        val previous = this.project
         this.project = project
-        visualIndices = project.timeline.tracks.filter { it.type != TrackType.AUDIO }.map(::TrackIndex)
+        visualIndices = project.timeline.tracks.filter { it.type == TrackType.VIDEO || it.type == TrackType.OVERLAY }.map(::TrackIndex)
         mutableState.value = state.value.copy(positionUs = state.value.positionUs.coerceIn(0, project.durationUs))
+        // The editor's canvas adapter renders the shared text bitmaps directly for under-finger
+        // movement. Text-only changes do not require a decoder rebuild while duration is stable.
+        if (!renderTextInPlayer && previous != null && previous.canvas == project.canvas &&
+            previous.durationUs == project.durationUs && previous.media == project.media &&
+            previous.timeline.tracks.filter { it.type != TrackType.TEXT } == project.timeline.tracks.filter { it.type != TrackType.TEXT } &&
+            previous.timeline.transitions == project.timeline.transitions) return
         if (active) compileProject()
     }
 
@@ -211,7 +219,7 @@ class PreviewEngine(
                 delay(60)
                 // Lower preview resolution reduces GPU memory without changing aspect or edits.
                 val (width, height) = state.value.quality.dimensions(snapshot.canvas)
-                val compiled = compiler.compile(snapshot, width, height, preferSingleVisualInput = true)
+                val compiled = compiler.compile(snapshot, width, height, preferSingleVisualInput = true, renderText = renderTextInPlayer)
                 if (generation != revision || !active) return@launch
                 // Legacy multi-input graphs cannot reliably flush their compositor queues after
                 // edits. Single-input graphs can be updated in place; layered graphs start fresh.

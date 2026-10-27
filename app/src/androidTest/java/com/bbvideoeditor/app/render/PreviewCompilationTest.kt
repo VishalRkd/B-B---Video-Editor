@@ -136,7 +136,7 @@ class PreviewCompilationTest {
         val project = Project(canvas = CanvasSettings(320, 180, 30), media = mapOf(audio.id to audio),
             timeline = Timeline(listOf(Track(name = "Sound", type = TrackType.AUDIO, clips = listOf(clip)))))
         val compiled = CompositionCompiler(context).compile(project, preferSingleVisualInput = true)
-        assertTrue(compiled.requiresCompositor)
+        assertFalse(compiled.requiresCompositor)
         assertEquals(2, compiled.composition.sequences.size)
         assertEquals(setOf(C.TRACK_TYPE_VIDEO), compiled.composition.sequences.first().trackTypes)
         assertEquals(project.durationUs, compiled.composition.sequences.first().editedMediaItems.single().presentationDurationUs)

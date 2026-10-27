@@ -35,7 +35,7 @@ class EditorGesturesTest {
         val clip = editor.state.value.project.timeline.clips.single()
         compose.onNodeWithContentDescription("Clip Editing test", substring = true).performClick()
         compose.runOnIdle { editor.seek(1_000_000); editor.endScrub() }
-        compose.onNodeWithText("Split").performClick()
+        compose.onNodeWithText("Split").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(2, editor.state.value.project.timeline.clips.size)
             assertEquals(1_000_000L, editor.state.value.project.findClip(clip.id)!!.durationUs)

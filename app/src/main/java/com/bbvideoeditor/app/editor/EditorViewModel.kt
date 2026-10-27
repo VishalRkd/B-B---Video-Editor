@@ -14,6 +14,7 @@ data class EditorUiState(
     val canRedo: Boolean = false,
     val message: String? = null,
     val scrubbing: Boolean = false,
+    val editTextClipId: String? = null,
 )
 
 /** UI state and command coordination. Players consume the same immutable Project. */
@@ -28,8 +29,15 @@ class EditorViewModel(initialProject: Project) : ViewModel() {
     private var gestureBase: Project? = null
     private var gestureCommand: EditorCommand? = null
 
-    fun select(id: String?) { mutableState.value = state.value.copy(selectedClipId = id) }
+    fun select(id: String?) {
+        mutableState.value = state.value.copy(selectedClipId = id)
+        val clip = id?.let { state.value.project.findClip(it) }
+        if (clip?.text != null && (state.value.positionUs < clip.startUs || state.value.positionUs >= clip.endUs)) {
+            seek(clip.startUs); endScrub()
+        }
+    }
     fun message(text: String?) { mutableState.value = state.value.copy(message = text) }
+    fun editText(id: String?) { mutableState.value = state.value.copy(editTextClipId = id) }
     fun execute(command: EditorCommand) {
         try {
             if (history.execute(command)) publish()
@@ -85,6 +93,7 @@ class EditorViewModel(initialProject: Project) : ViewModel() {
         mutableState.value = state.value.copy(
             project = project,
             selectedClipId = state.value.selectedClipId?.takeIf { project.findClip(it) != null },
+            editTextClipId = state.value.editTextClipId?.takeIf { project.findClip(it) != null },
             positionUs = state.value.positionUs.coerceAtMost(project.timeline.durationUs),
             canUndo = history.canUndo, canRedo = history.canRedo,
         )

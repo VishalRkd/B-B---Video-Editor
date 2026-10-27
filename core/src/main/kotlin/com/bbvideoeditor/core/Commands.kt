@@ -34,6 +34,33 @@ data class AddClips(val trackId: String, val clips: List<Clip>, val media: List<
     }
 }
 
+/** Text is native project content and never creates a synthetic media reference. */
+data class AddTextClip(val clip: Clip, val trackId: String? = null, val newTrackId: String = newId()) : EditorCommand {
+    override val label = "Add text"
+    override fun apply(project: Project): Project {
+        require(clip.text != null)
+        val target = trackId?.let { requireNotNull(project.findTrack(it)) }
+            ?: project.timeline.tracks.firstOrNull { track ->
+                track.type == TrackType.TEXT && !track.locked && track.clips.none { clip.startUs < it.endUs && clip.endUs > it.startUs }
+            }
+        if (target != null) return AddClips(target.id, listOf(clip)).apply(project)
+        return project.copy(timeline = project.timeline.copy(tracks = project.timeline.tracks +
+            Track(id = newTrackId, name = "Text ${project.timeline.tracks.count { it.type == TrackType.TEXT } + 1}",
+                type = TrackType.TEXT, clips = listOf(clip)))).validate()
+    }
+}
+
+data class UpdateTextClip(val clipId: String, val content: TextContent, val startUs: Long, val durationUs: Long) : EditorCommand {
+    override val label = "Edit text"
+    override fun apply(project: Project): Project {
+        val (track, clip) = project.requireClip(clipId)
+        require(clip.text != null)
+        val edited = clip.copy(text = content, startUs = startUs, sourceRange = TimeRange(clip.sourceRange.startUs, durationUs),
+            durationOverrideUs = null, sourceRoundingOffsetUs = 0.0)
+        return project.editTrack(track.id) { it.copy(clips = it.clips.map { item -> if (item.id == clipId) edited else item }.sortedBy { item -> item.startUs }) }
+    }
+}
+
 data class MoveClip(val clipId: String, val targetTrackId: String, val startUs: Long) : EditorCommand {
     override val label: String = "Move clip"
     override fun apply(project: Project): Project {

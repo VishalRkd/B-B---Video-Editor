@@ -128,7 +128,7 @@ class ProjectRepository(context: Context) {
             require(input.channel.size() <= MAX_PROJECT_BYTES) { "Project file is too large" }
             input.readBytes()
         }
-        return json.decodeFromString<Project>(bytes.toString(Charsets.UTF_8)).validate().also {
+        return json.decodeFromString<Project>(bytes.toString(Charsets.UTF_8)).upgradeSchema().also {
             require(it.id == expectedId) { "Project identifier does not match its file" }
         }
     }

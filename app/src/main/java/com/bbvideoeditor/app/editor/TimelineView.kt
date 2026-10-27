@@ -123,6 +123,11 @@ fun TimelineView(
     val indexes = remember(state.project.timeline.tracks) { state.project.timeline.tracks.associate { it.id to TrackIndex(it) } }
     val currentIndexes by rememberUpdatedState(indexes)
 
+    LaunchedEffect(state.selectedClipId) {
+        val index = state.project.timeline.tracks.indexOfFirst { track -> track.clips.any { it.id == state.selectedClipId } }
+        if (index >= 0 && rows.layoutInfo.visibleItemsInfo.none { it.index == index }) rows.animateScrollToItem(index)
+    }
+
     DisposableEffect(editor) {
         onDispose {
             motion.fling?.cancel()
@@ -193,8 +198,7 @@ fun TimelineView(
                                 val target = trackAt(rows, editor.state.value.project, position.y - rulerPx)
                                     ?: editor.state.value.project.findTrackForClip(active.clip.id)
                                     ?: return
-                                val source = active.project.media[active.clip.mediaId] ?: return
-                                if (target.locked || !target.type.accepts(source.kind)) return
+                                if (target.locked || !target.type.accepts(active.clip, active.project.media)) return
                                 val raw = (active.clip.startUs + deltaUs).coerceAtLeast(0)
                                 val snap = TimelineSnapper.snapMove(raw, active.clip.durationUs, targets, toleranceUs)
                                 val otherClips = active.project.findTrack(target.id)?.clips.orEmpty().filterNot { it.id == active.clip.id }
@@ -355,6 +359,13 @@ private fun trimCommand(active: PointerEdit, deltaUs: Long, targets: List<Long>,
     val minimum = min(clip.sourceRange.durationUs, max(1L, ceil(MICROS_PER_SECOND.toDouble() / active.project.canvas.frameRate * clip.speed).toLong()))
     return if (active.kind == EditKind.TRIM_START) {
         val desired = TimelineSnapper.snap((clip.startUs + deltaUs).coerceAtLeast(0), targets, toleranceUs)
+        if (clip.text != null) {
+            // Native text has no source-file boundary: its left edge can extend into empty time.
+            val start = desired.timeUs.coerceIn(previousEnd, clip.endUs - minimum)
+            val sourceStart = (clip.sourceRange.startUs + start - clip.startUs).coerceAtLeast(0)
+            return TrimClip(clip.id, TimeRange(sourceStart, clip.endUs - start), start) to
+                desired.targetUs?.takeIf { abs(it - start) <= 12 }
+        }
         val earliestSource = max(0L, clip.sourceRange.endUs - ((clip.endUs - previousEnd) * clip.speed.toDouble()).toLong())
         val latestSource = (clip.sourceRange.endUs - minimum).coerceAtLeast(earliestSource)
         val newSourceStart = (clip.sourceRange.startUs + (desired.timeUs - clip.startUs) * clip.speed.toDouble()).roundToLong().coerceIn(earliestSource, latestSource)
@@ -363,8 +374,8 @@ private fun trimCommand(active: PointerEdit, deltaUs: Long, targets: List<Long>,
         TrimClip(clip.id, range, newStart.coerceAtLeast(previousEnd)) to desired.targetUs?.takeIf { abs(it - newStart) <= 12 }
     } else {
         val desired = TimelineSnapper.snap((clip.endUs + deltaUs).coerceAtLeast(clip.startUs), targets, toleranceUs)
-        val source = active.project.media[clip.mediaId]!!
-        val mediaEnd = if (source.kind == MediaKind.IMAGE) Long.MAX_VALUE / 4 else source.durationUs
+        val source = active.project.media[clip.mediaId]
+        val mediaEnd = if (clip.text != null || source?.kind == MediaKind.IMAGE) Long.MAX_VALUE / 4 else requireNotNull(source).durationUs
         val trackLimit = nextStart?.let { clip.sourceRange.startUs + ((it - clip.startUs) * clip.speed.toDouble())
             .coerceAtMost((Long.MAX_VALUE - clip.sourceRange.startUs).toDouble()).toLong() } ?: mediaEnd
         val maximum = min(mediaEnd, trackLimit).coerceAtLeast(clip.sourceRange.startUs + minimum)
@@ -380,7 +391,7 @@ private fun TrackLabel(track: Track, editor: EditorViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceBetween) {
         Text(track.name, color = Muted, fontSize = 9.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Row {
-            IconButton(onClick = { editor.execute(SetTrackMuted(track.id, !track.muted)) }, enabled = !track.locked, modifier = Modifier.size(28.dp)) {
+            if (track.type != TrackType.TEXT) IconButton(onClick = { editor.execute(SetTrackMuted(track.id, !track.muted)) }, enabled = !track.locked, modifier = Modifier.size(28.dp)) {
                 Icon(if (track.muted) Icons.Default.VolumeOff else Icons.Default.VolumeUp, if (track.muted) "Unmute ${track.name}" else "Mute ${track.name}", Modifier.size(14.dp), tint = if (track.muted) Accent else Muted)
             }
             IconButton(onClick = { editor.execute(SetTrackLocked(track.id, !track.locked)) }, modifier = Modifier.size(28.dp)) {
@@ -424,7 +435,7 @@ private fun TimelineTrack(
     val clips = remember(index, leftTime, rightTime) { index.visibleClips(leftTime, rightTime) }
     Box(modifier.fillMaxHeight().clipToBounds().background(color.copy(alpha = .06f))) {
         Canvas(Modifier.fillMaxSize()) { drawLine(PanelRaised, Offset(0f, size.height), Offset(size.width, size.height), 1f) }
-        if (track.clips.isEmpty()) Text("Add ${if (track.type == TrackType.AUDIO) "audio" else "media"}", Modifier.padding(12.dp).align(Alignment.CenterStart), color = Muted.copy(alpha = .5f), fontSize = 10.sp)
+        if (track.clips.isEmpty()) Text("Add ${when (track.type) { TrackType.AUDIO -> "audio"; TrackType.TEXT -> "text"; else -> "media" }}", Modifier.padding(12.dp).align(Alignment.CenterStart), color = Muted.copy(alpha = .5f), fontSize = 10.sp)
         clips.forEach { clip ->
             key(clip.id) {
                 val x = viewport.timeToX(clip.startUs, widthPx)
@@ -440,14 +451,14 @@ private fun TimelineTrack(
                     .border(if (selectedId == clip.id) 2.dp else .5.dp,
                         if (selectedId == clip.id) Accent else Color.White.copy(alpha = .12f), RoundedCornerShape(7.dp))
                     .semantics {
-                        contentDescription = "Clip ${media?.displayName ?: clip.id}, ${formatTime(clip.durationUs, true)}${if (draggingId == clip.id) ", moving" else ""}"
+                        contentDescription = "Clip ${clip.text?.text ?: media?.displayName ?: clip.id}, ${formatTime(clip.durationUs, true)}${if (draggingId == clip.id) ", moving" else ""}"
                         onClick("Select clip") { editor.select(clip.id); true }
                     }) {
                     if (media != null && media.kind != MediaKind.AUDIO && track.type != TrackType.AUDIO && thumbnails != null)
                         ThumbnailStrip(media, clip, x, visibleX, visibleWidth, viewport.pixelsPerSecond, thumbnails)
                     if (media != null && (track.type == TrackType.AUDIO || media.kind == MediaKind.AUDIO) && waveforms != null)
                         WaveformStrip(media, clip, x, visibleX, viewport.pixelsPerSecond, waveforms, Modifier.fillMaxWidth().height(30.dp).align(Alignment.BottomCenter))
-                    Text(media?.displayName ?: "Missing media", Modifier.fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(horizontal = 10.dp, vertical = 3.dp), color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(clip.text?.text ?: media?.displayName ?: "Missing media", Modifier.fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(horizontal = 10.dp, vertical = 3.dp), color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (selectedId == clip.id && !track.locked) {
                         if (x >= -1) TrimHandle(true, Modifier.align(Alignment.CenterStart))
                         if (endX <= widthPx + 1) TrimHandle(false, Modifier.align(Alignment.CenterEnd))

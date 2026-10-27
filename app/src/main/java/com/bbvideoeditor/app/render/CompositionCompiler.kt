@@ -15,6 +15,7 @@ import androidx.media3.common.audio.ToInt16PcmAudioProcessor
 import androidx.media3.common.util.Size
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
+import androidx.media3.effect.OverlayEffect
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
@@ -55,6 +56,7 @@ data class CompiledComposition(
 class CompositionCompiler(
     context: Context,
     private val effects: RenderEffectRegistry = RenderEffectRegistry(),
+    private val textBitmaps: TextBitmapCache = TextBitmapCache(),
 ) {
     private val context = context.applicationContext
     private val clockAssetMutex = Mutex()
@@ -65,15 +67,16 @@ class CompositionCompiler(
         outputHeight: Int = project.canvas.height,
         frameRate: Int = project.canvas.frameRate,
         preferSingleVisualInput: Boolean = false,
+        renderText: Boolean = true,
     ): CompiledComposition = withContext(Dispatchers.Default) {
         project.validate()
-        require(project.durationUs > 0) { "Add media before previewing or exporting." }
+        require(project.durationUs > 0) { "Add media or text before previewing or exporting." }
         require(outputWidth in 2..8192 && outputHeight in 2..8192 && outputWidth % 2 == 0 && outputHeight % 2 == 0)
         require(frameRate in 1..120)
         if (project.timeline.transitions.isNotEmpty()) {
             throw UnsupportedRenderFeature("Transitions in this project require a transition renderer.")
         }
-        val usedMedia = project.timeline.clips.map { it.mediaId }.toSet()
+        val usedMedia = project.timeline.clips.mapNotNull { it.mediaId }.toSet()
         withContext(Dispatchers.IO) {
             for (id in usedMedia) {
                 coroutineContext.ensureActive()
@@ -87,17 +90,25 @@ class CompositionCompiler(
                 }
             }
         }
+        val textTracks = project.timeline.tracks.filter { it.type == TrackType.TEXT && it.clips.isNotEmpty() }
+        for (track in textTracks) {
+            for (clip in track.clips) {
+                require(clip.effects.none { it.enabled } && clip.properties.isEmpty()) { "Animated text and text effects are not supported yet." }
+            }
+            // Prewarm a small window off the render thread. Later captions are cached on demand.
+            if (renderText) track.clips.sortedBy { it.startUs }.take(2).forEach { textBitmaps.get(requireNotNull(it.text), project.canvas, outputHeight) }
+        }
         val visualTracks = project.timeline.tracks
-            .filter { it.type != TrackType.AUDIO && it.clips.isNotEmpty() }
+            .filter { (it.type == TrackType.VIDEO || it.type == TrackType.OVERLAY) && it.clips.isNotEmpty() }
             .reversed()
         val visualClips = visualTracks.flatMap { it.clips }.sortedBy { it.startUs }
         // With no simultaneous layers or compositor-only edits, all visual clips can share one
         // decoder sequence. Keep this an explicit preview optimization: export still uses the
         // clock-backed graph, and projects needing composition retain their original layer order.
-        val useSingleVisualInput = preferSingleVisualInput && visualClips.isNotEmpty() &&
+        val useSingleVisualInput = preferSingleVisualInput && (visualClips.isNotEmpty() || textTracks.isNotEmpty()) &&
             visualClips.all { it.transform == Transform() && it.effects.none { effect -> effect.enabled } } &&
             visualClips.zipWithNext().all { (previous, next) -> previous.endUs <= next.startUs }
-        val compiledVisualTracks = if (useSingleVisualInput) {
+        val compiledVisualTracks = if (useSingleVisualInput && visualTracks.isNotEmpty()) {
             listOf(visualTracks.first().copy(clips = visualClips))
         } else visualTracks
         // Decode audio in dedicated sequences, even when it belongs to a video clip. This avoids
@@ -109,7 +120,7 @@ class CompositionCompiler(
         }
         val sequenceTracks = compiledVisualTracks + audioTracks
         val sequences = mutableListOf<EditedMediaItemSequence>()
-        if (!useSingleVisualInput) sequences.add(clockSequence(ensureClockAsset(), project.durationUs, frameRate))
+        if (!useSingleVisualInput || visualTracks.isEmpty()) sequences.add(clockSequence(ensureClockAsset(), project.durationUs, frameRate))
         val warnings = mutableListOf<String>()
         for (track in sequenceTracks) {
             coroutineContext.ensureActive()
@@ -137,18 +148,23 @@ class CompositionCompiler(
         }
         val compositionBuilder = Composition.Builder(sequences)
             .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
-        if (useSingleVisualInput) {
+        val compositionEffects = mutableListOf<androidx.media3.common.Effect>()
+        val requiresCompositor = !useSingleVisualInput && visualTracks.isNotEmpty()
+        if (!requiresCompositor) {
             // Native video gaps decode as small black bitmaps. Apply the output canvas after
             // every item, including gaps, without requiring a second visual clock input.
-            compositionBuilder.setEffects(Effects(emptyList(), listOf(
-                Presentation.createForWidthAndHeight(outputWidth, outputHeight, Presentation.LAYOUT_SCALE_TO_FIT),
-            )))
+            compositionEffects += Presentation.createForWidthAndHeight(outputWidth, outputHeight, Presentation.LAYOUT_SCALE_TO_FIT)
         } else {
             compositionBuilder.setVideoCompositorSettings(ProjectCompositor(visualTracks, outputWidth, outputHeight))
         }
+        // Text tracks form the title/caption stack above the visual composition. Chunking avoids
+        // exceeding texture-unit limits on older GPUs while retaining the track stacking order.
+        textTracks.filter { renderText }.map { TimelineTextOverlay(it, project.canvas, outputHeight, textBitmaps) }.chunked(8)
+            .forEach { compositionEffects += OverlayEffect(it) }
+        compositionBuilder.setEffects(Effects(emptyList(), compositionEffects))
         CompiledComposition(
             compositionBuilder.build(), project.durationUs, warnings, outputWidth, outputHeight, frameRate,
-            requiresCompositor = !useSingleVisualInput,
+            requiresCompositor = requiresCompositor,
         )
     }
 

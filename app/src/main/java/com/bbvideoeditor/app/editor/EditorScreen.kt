@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bbvideoeditor.app.media.ThumbnailProvider
 import com.bbvideoeditor.app.media.WaveformRepository
+import com.bbvideoeditor.app.render.TextBitmapCache
 import com.bbvideoeditor.app.ui.*
 import com.bbvideoeditor.core.*
 import kotlin.math.roundToInt
@@ -39,6 +41,7 @@ fun EditorScreen(
     onExport: (() -> Unit)? = null,
     preview: @Composable (Modifier) -> Unit = { EmptyPreview(it) },
     waveforms: WaveformRepository? = null,
+    textBitmaps: TextBitmapCache? = null,
 ) {
     val state by editor.state.collectAsStateWithLifecycle()
     val selected = state.selectedClipId?.let { state.project.findClip(it) }
@@ -47,6 +50,8 @@ fun EditorScreen(
     var showCanvas by remember { mutableStateOf(false) }
     var showTracks by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
+    var newTextCaption by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val textCache = textBitmaps ?: remember { TextBitmapCache() }
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); editor.message(null) } }
 
@@ -95,6 +100,9 @@ fun EditorScreen(
                 Tool("Media", Icons.Default.Add, !importing) { onImport(TrackType.VIDEO) }
                 Tool("Audio", Icons.Default.MusicNote, !importing) { onImport(TrackType.AUDIO) }
                 Tool("Overlay", Icons.Default.Layers, !importing) { onImport(TrackType.OVERLAY) }
+                Tool("Text", Icons.Default.TextFields) { editor.setPlaying(false); newTextCaption = false }
+                Tool("Caption", Icons.Default.Subtitles) { editor.setPlaying(false); newTextCaption = true }
+                if (selected?.text != null) Tool("Edit text", Icons.Default.Edit, track?.locked == false) { editor.setPlaying(false); editor.editText(selected.id) }
                 Tool("Split", Icons.Default.ContentCut, selected != null && track?.locked == false && state.positionUs > selected.startUs && state.positionUs < selected.endUs) { selected?.let { editor.execute(SplitClip(it.id, state.positionUs)) } }
                 Tool("Delete", Icons.Default.DeleteOutline, selected != null && track?.locked == false) { selected?.let { editor.execute(DeleteClip(it.id)) } }
                 Tool("Duplicate", Icons.Default.ContentCopy, selected != null && track?.locked == false) { selected?.let { editor.execute(DuplicateClip(it.id)) } }
@@ -108,6 +116,23 @@ fun EditorScreen(
                 Tool("Tracks", Icons.Default.ViewAgenda) { showTracks = true }
                 Tool("Canvas", Icons.Default.AspectRatio) { showCanvas = true }
             }
+        }
+    }
+    val editingText = state.editTextClipId?.let { state.project.findClip(it) }?.takeIf { it.text != null }
+    if (newTextCaption != null || editingText != null) {
+        key(editingText?.id, newTextCaption) {
+            TextEditorDialog(editingText, newTextCaption == true, state.positionUs, state.project, textCache,
+                onDismiss = { newTextCaption = null; editor.editText(null) }, onSave = { content, startUs, durationUs ->
+                    runCatching {
+                        val clip = editingText ?: Clip(startUs = startUs, sourceRange = TimeRange(0, durationUs), text = content,
+                            transform = Transform(translationY = if (newTextCaption == true) -.72f else 0f))
+                        val command = if (editingText == null) AddTextClip(clip) else UpdateTextClip(clip.id, content, startUs, durationUs)
+                        command.apply(state.project) // Keep the dialog open if timing overlaps another caption.
+                        editor.execute(command)
+                        editor.select(clip.id)
+                        newTextCaption = null; editor.editText(null)
+                    }.exceptionOrNull()?.let { it.message ?: "Unable to save text." }
+                })
         }
     }
     if (showProperties && selected != null) ClipProperties(selected, state.project, onDismiss = { showProperties = false }, onApply = { speed, volume, transform ->
@@ -128,10 +153,11 @@ fun EditorScreen(
                 state.project.timeline.tracks.forEach { t ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(t.name, Modifier.weight(1f))
-                        IconButton(onClick = { editor.execute(SetTrackMuted(t.id, !t.muted)) }) { Icon(if (t.muted) Icons.Default.VolumeOff else Icons.Default.VolumeUp, "Toggle mute") }
+                        if (t.type != TrackType.TEXT) IconButton(onClick = { editor.execute(SetTrackMuted(t.id, !t.muted)) }) { Icon(if (t.muted) Icons.Default.VolumeOff else Icons.Default.VolumeUp, "Toggle mute") }
                         IconButton(onClick = { editor.execute(SetTrackLocked(t.id, !t.locked)) }) { Icon(if (t.locked) Icons.Default.Lock else Icons.Default.LockOpen, "Toggle lock") }
                     }
                 }
+                TextButton(onClick = { editor.execute(AddTrack(Track(name = "Text ${state.project.timeline.tracks.count { it.type == TrackType.TEXT } + 1}", type = TrackType.TEXT))) }) { Text("+ Text track") }
                 Row {
                     TextButton(onClick = { editor.execute(AddTrack(Track(name = "Overlay ${state.project.timeline.tracks.count { it.type == TrackType.OVERLAY } + 1}", type = TrackType.OVERLAY))) }) { Text("+ Overlay") }
                     TextButton(onClick = { editor.execute(AddTrack(Track(name = "Audio ${state.project.timeline.tracks.count { it.type == TrackType.AUDIO } + 1}", type = TrackType.AUDIO))) }) { Text("+ Audio") }
@@ -164,7 +190,7 @@ fun EmptyPreview(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(14.dp))
         Text("Your next story starts here", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
-        Text("Add videos or photos to begin editing", color = Muted, fontSize = 12.sp)
+        Text("Add media or text to begin editing", color = Muted, fontSize = 12.sp)
     }
 }
 
@@ -180,8 +206,10 @@ private fun ClipProperties(clip: Clip, project: Project, onDismiss: () -> Unit, 
     val media = project.media[clip.mediaId]
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Clip adjustments") }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-            PropertySlider("Speed", "%.2f×".format(speed), speed, .25f..4f) { speed = (it * 20).roundToInt() / 20f }
-            PropertySlider("Volume", "${(volume * 100).roundToInt()}%", volume, 0f..2f) { volume = it }
+            if (clip.text == null) {
+                PropertySlider("Speed", "%.2f×".format(speed), speed, .25f..4f) { speed = (it * 20).roundToInt() / 20f }
+                PropertySlider("Volume", "${(volume * 100).roundToInt()}%", volume, 0f..2f) { volume = it }
+            }
             if (media?.kind != MediaKind.AUDIO) {
                 PropertySlider("Scale", "%.2f×".format(scale), scale, .1f..3f) { scale = it }
                 PropertySlider("Rotation", "${rotation.roundToInt()}°", rotation, -180f..180f) { rotation = it }
@@ -190,7 +218,7 @@ private fun ClipProperties(clip: Clip, project: Project, onDismiss: () -> Unit, 
                 PropertySlider("Opacity", "${(opacity * 100).roundToInt()}%", opacity, 0f..1f) { opacity = it }
             }
             Text("Move to track", color = Muted, fontSize = 12.sp)
-            project.timeline.tracks.filter { it.id != project.findTrackForClip(clip.id)?.id && !it.locked && media != null && it.type.accepts(media.kind) }.forEach { track ->
+            project.timeline.tracks.filter { it.id != project.findTrackForClip(clip.id)?.id && !it.locked && it.type.accepts(clip, project.media) }.forEach { track ->
                 TextButton(onClick = { onMove(track) }) { Text(track.name) }
             }
         }
