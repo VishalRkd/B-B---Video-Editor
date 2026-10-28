@@ -86,7 +86,8 @@ class PreviewContinuityTest {
         val project = Project(canvas = CanvasSettings(320, 180, 30),
             media = listOf(red, blue, white).associateBy { it.id },
             timeline = Timeline(listOf(Track(name = "Video", type = TrackType.VIDEO, clips = listOf(
-                Clip(mediaId = red.id, startUs = 0, sourceRange = TimeRange(200_000, 1_600_000), speed = 2f),
+                Clip(mediaId = red.id, startUs = 0, sourceRange = TimeRange(200_000, 1_600_000), speed = 2f,
+                    effects = listOf(com.bbvideoeditor.core.EffectSpec(type = "brightness", parameters = mapOf("amount" to -.05f)))),
                 Clip(mediaId = blue.id, startUs = 800_000, sourceRange = TimeRange(200_000, 800_000), speed = .5f),
                 Clip(mediaId = white.id, startUs = 2_400_000, sourceRange = TimeRange(0, 600_000)),
                 Clip(mediaId = red.id, startUs = 3_000_000, sourceRange = TimeRange(400_000, 1_000_000)),
@@ -103,8 +104,53 @@ class PreviewContinuityTest {
         assertContinuousPreview(project, windows, seekCycle + seekCycle)
     }
 
+    @Test fun layeredBoundariesKeepCorrectFramesAndOnlyRestartWhenANewClipStarts() {
+        val fixtures = MediaFixtures(context)
+        val red = fixtures.video("layered-continuity-red", 1f, 0f, 0f)
+        val blue = fixtures.video("layered-continuity-blue", 0f, 0f, 1f)
+        val white = fixtures.image("layered-continuity-white", Color.WHITE)
+        val project = Project(canvas = CanvasSettings(320, 180, 30),
+            media = listOf(red, blue, white).associateBy { it.id },
+            timeline = Timeline(listOf(
+                Track(name = "base", type = TrackType.VIDEO, clips = listOf(
+                    Clip(mediaId = red.id, startUs = 0, sourceRange = TimeRange(0, 2_000_000)),
+                    Clip(mediaId = blue.id, startUs = 2_000_000, sourceRange = TimeRange(0, 2_000_000)))),
+                Track(name = "overlay", type = TrackType.OVERLAY, clips = listOf(
+                    Clip(mediaId = white.id, startUs = 500_000, sourceRange = TimeRange(0, 700_000),
+                        transform = com.bbvideoeditor.core.Transform(scaleX = .3f, scaleY = .3f, translationX = .5f, translationY = .5f)),
+                    Clip(mediaId = white.id, startUs = 2_700_000, sourceRange = TimeRange(0, 700_000),
+                        transform = com.bbvideoeditor.core.Transform(scaleX = .3f, scaleY = .3f, translationX = .5f, translationY = .5f)))))))
+        assertContinuousPreview(project, listOf(
+            ColorWindow("red before overlay", 100_000, 350_000, Color.RED, Color.RED),
+            ColorWindow("first overlay", 650_000, 1_050_000, Color.RED, Color.WHITE),
+            ColorWindow("overlay gone", 1_350_000, 1_850_000, Color.RED, Color.RED),
+            ColorWindow("base cut", 2_150_000, 2_550_000, Color.BLUE, Color.BLUE),
+            ColorWindow("second overlay", 2_850_000, 3_250_000, Color.BLUE, Color.WHITE),
+            ColorWindow("second overlay gone", 3_550_000, 3_850_000, Color.BLUE, Color.BLUE),
+        ), emptyList(), permittedRestarts = listOf(500_000L, 2_000_000L, 2_700_000L))
+    }
+
+    @Test fun animatedOpacityAdvancesDuringNaturalPlaybackAndStopsAtProjectEnd() {
+        val fixtures = MediaFixtures(context)
+        val blue = fixtures.image("opacity-natural-blue", Color.BLUE)
+        val red = fixtures.image("opacity-natural-red", Color.RED)
+        val overlay = Clip(mediaId = red.id, startUs = 300_000, sourceRange = TimeRange(500_000, 2_000_000), speed = 2f,
+            properties = listOf(com.bbvideoeditor.core.AnimatedProperty("opacity", 1f, listOf(
+                com.bbvideoeditor.core.Keyframe(500_000, 0f), com.bbvideoeditor.core.Keyframe(1_500_000, 1f)))))
+        val project = Project(canvas = CanvasSettings(320, 180, 30), media = listOf(blue, red).associateBy { it.id },
+            timeline = Timeline(listOf(
+                Track(name = "base", type = TrackType.VIDEO, clips = listOf(Clip(mediaId = blue.id, startUs = 0, sourceRange = TimeRange(0, 1_800_000)))),
+                Track(name = "animated", type = TrackType.OVERLAY, clips = listOf(overlay)))))
+        assertContinuousPreview(project, listOf(
+            ColorWindow("before animated overlay", 50_000, 250_000, Color.BLUE, Color.BLUE),
+            ColorWindow("interpolated opacity", 550_000, 650_000, Color.rgb(150, 0, 105), Color.rgb(150, 0, 105)),
+            ColorWindow("opaque endpoint", 900_000, 1_150_000, Color.RED, Color.RED),
+            ColorWindow("after animated overlay", 1_450_000, 1_700_000, Color.BLUE, Color.BLUE),
+        ), emptyList(), permittedRestarts = listOf(300_000L))
+    }
+
     private fun assertContinuousPreview(project: Project, windows: List<ColorWindow>,
-                                        pausedSeeks: List<Pair<Long, Int>>) {
+                                        pausedSeeks: List<Pair<Long, Int>>, permittedRestarts: List<Long> = emptyList()) {
         val engine = onMain { PreviewEngine(context, CompositionCompiler(context)) }
         val trace = PlaybackTrace(project.durationUs)
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -126,9 +172,9 @@ class PreviewContinuityTest {
                     assertNull("Preview failed during startup", engine.state.value.error)
                     onMain { engine.state.value.player?.playbackState == Player.STATE_READY }
                 }
-                await("initial red frame before playback") {
+                await("initial frame before playback") {
                     screenshot(view!!)?.let { frame ->
-                        try { matches(pixel(frame, .5f, .5f), Color.RED) }
+                        try { matches(pixel(frame, .5f, .5f), windows.first().center) }
                         finally { frame.recycle() }
                     } ?: false
                 }
@@ -138,7 +184,10 @@ class PreviewContinuityTest {
                 onMain { engine.play() }
                 await("playback start") { onMain { trace.startedAtMs != null } }
                 val deadlineMs = SystemClock.elapsedRealtime() + 12_000
-                while (!onMain { engine.state.value.player?.playbackState == Player.STATE_ENDED }) {
+                while (!onMain {
+                    if (permittedRestarts.isEmpty()) engine.state.value.player?.playbackState == Player.STATE_ENDED
+                    else engine.state.value.positionUs == project.durationUs && !engine.state.value.playWhenReady
+                }) {
                     assertNull("Preview failed during natural playback", engine.state.value.error)
                     assertTrue("Playback did not reach the end: ${onMain { trace.describe() }}",
                         SystemClock.elapsedRealtime() < deadlineMs)
@@ -171,10 +220,18 @@ class PreviewContinuityTest {
                         window.samples > 0)
                 }
                 onMain {
-                    assertTrue("Player detached or replaced at a natural boundary: $diagnostics", trace.playerChanges.isEmpty())
-                    assertEquals("Playback rebuffered after startup: $diagnostics", 0, trace.playbackBufferingEvents)
+                    if (permittedRestarts.isEmpty()) {
+                        assertTrue("Player detached or replaced at a natural boundary: $diagnostics", trace.playerChanges.isEmpty())
+                        assertEquals("Playback rebuffered after startup: $diagnostics", 0, trace.playbackBufferingEvents)
+                    } else {
+                        assertTrue("An unexpected time triggered a rebuild: $diagnostics", trace.playerChanges.all { change ->
+                            val time = change.substringBefore("us:").toLong()
+                            permittedRestarts.any { abs(time - it) < 170_000 }
+                        })
+                        assertEquals("Expected one detach and one replacement per visual boundary: $diagnostics", permittedRestarts.size * 2, trace.playerChanges.size)
+                    }
                     assertTrue("Clock moved backwards: $diagnostics", trace.clockRegressions.isEmpty())
-                    assertTrue("Playback paused before the end: $diagnostics", trace.earlyStops.isEmpty())
+                    if (permittedRestarts.isEmpty()) assertTrue("Playback paused before the end: $diagnostics", trace.earlyStops.isEmpty())
                 }
                 assertTrue("Playback took ${elapsedMs}ms for ${timelineMs}ms of timeline; $diagnostics",
                     elapsedMs <= timelineMs + 2_000)

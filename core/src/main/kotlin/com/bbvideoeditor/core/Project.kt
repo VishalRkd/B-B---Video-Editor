@@ -91,7 +91,7 @@ data class AnimatedProperty(val name: String, val value: Float, val keyframes: L
         val right = keyframes[insertion]
         if (left.interpolation == Interpolation.HOLD) return left.value
         val fraction = (sourceTimeUs - left.sourceTimeUs).toDouble() / (right.sourceTimeUs - left.sourceTimeUs)
-        return (left.value + (right.value - left.value) * fraction).toFloat()
+        return (left.value.toDouble() + (right.value.toDouble() - left.value.toDouble()) * fraction).toFloat()
     }
 }
 

@@ -13,7 +13,8 @@ import androidx.media3.effect.SingleInputVideoGraph
 import androidx.media3.transformer.CompositionPlayer
 import com.bbvideoeditor.app.render.CompositionCompiler
 import com.bbvideoeditor.core.Project
-import com.bbvideoeditor.core.TrackIndex
+import com.bbvideoeditor.core.RenderTrack
+import com.bbvideoeditor.core.RenderPlan
 import com.bbvideoeditor.core.TrackType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class PreviewState(
     val positionUs: Long = 0,
@@ -60,6 +62,7 @@ class PreviewEngine(
     val state: StateFlow<PreviewState> = mutableState.asStateFlow()
     private var player: CompositionPlayer? = null
     private var project: Project? = null
+    private var renderPlan: RenderPlan? = null
     private var compileJob: Job? = null
     private var clockJob: Job? = null
     private var scrubJob: Job? = null
@@ -70,9 +73,10 @@ class PreviewEngine(
     private var requestedPlaying = false
     private var seekingUntilMs = 0L
     private var segmentIds: List<String?> = emptyList()
-    private var visualIndices: List<TrackIndex> = emptyList()
+    private var visualIndices: List<RenderTrack> = emptyList()
     private var requiresCompositor = true
     private var configuringPlayer = false
+    private var hasRenderedFrame = false
 
     fun updateProject(project: Project) {
         checkMainThread()
@@ -80,14 +84,23 @@ class PreviewEngine(
         if (this.project == project) return
         val previous = this.project
         this.project = project
-        visualIndices = project.timeline.tracks.filter { it.type == TrackType.VIDEO || it.type == TrackType.OVERLAY }.map(::TrackIndex)
         mutableState.value = state.value.copy(positionUs = state.value.positionUs.coerceIn(0, project.durationUs))
+        // Names, history timestamps, selection and locks do not change rendered content.
+        if (previous != null && previous.canvas == project.canvas && previous.media == project.media &&
+            previous.timeline.transitions == project.timeline.transitions &&
+            previous.timeline.tracks.size == project.timeline.tracks.size &&
+            previous.timeline.tracks.zip(project.timeline.tracks).all { (a, b) ->
+                a.type == b.type && a.muted == b.muted && a.clips == b.clips
+            }) return
         // The editor's canvas adapter renders the shared text bitmaps directly for under-finger
         // movement. Text-only changes do not require a decoder rebuild while duration is stable.
         if (!renderTextInPlayer && previous != null && previous.canvas == project.canvas &&
             previous.durationUs == project.durationUs && previous.media == project.media &&
             previous.timeline.tracks.filter { it.type != TrackType.TEXT } == project.timeline.tracks.filter { it.type != TrackType.TEXT } &&
-            previous.timeline.transitions == project.timeline.transitions) return
+            previous.timeline.transitions == project.timeline.transitions &&
+            project.timeline.tracks.filter { it.type == TrackType.TEXT }.flatMap { it.clips }.all {
+                it.effects.none { effect -> effect.enabled } && it.properties.isEmpty()
+            }) return
         if (active) compileProject()
     }
 
@@ -137,10 +150,12 @@ class PreviewEngine(
         // Keep the UI at the requested time while the decoder catches up. Player positions are ms.
         seekingUntilMs = android.os.SystemClock.elapsedRealtime() + 150
         val targetSegments = visualIndices.map { it.clipAt(targetUs)?.id }
-        if (requiresCompositor && targetSegments != segmentIds && active) {
+        val animatedTarget = visualIndices.any { it.clipAt(targetUs)?.properties?.isNotEmpty() == true }
+        if (requiresCompositor && (targetSegments != segmentIds || !hasRenderedFrame || animatedTarget) && active && appliedGeneration == generation) {
             // Media3 1.11 can retain a prewarmed decoder's old frame after a paused period
             // crossing. Recreate at the requested project position only at clip/gap boundaries.
-            // In-clip scrubbing retains the graph; the debounce coalesces fast boundary crossings.
+            // Animated seeks also require a fresh compositor timestamp; static in-clip scrubs
+            // retain their graph. The debounce coalesces rapid requests.
             segmentIds = targetSegments
             releasePlayer()
             mutableState.value = state.value.copy(player = null)
@@ -196,6 +211,8 @@ class PreviewEngine(
         suspendPlayback()
         closed = true
         project = null
+        renderPlan = null
+        visualIndices = emptyList()
         scope.cancel()
     }
 
@@ -209,6 +226,8 @@ class PreviewEngine(
         if (snapshot.durationUs == 0L) {
             requestedPlaying = false
             releasePlayer()
+            renderPlan = null
+            visualIndices = emptyList()
             mutableState.value = PreviewState(quality = state.value.quality)
             return
         }
@@ -219,7 +238,9 @@ class PreviewEngine(
                 delay(60)
                 // Lower preview resolution reduces GPU memory without changing aspect or edits.
                 val (width, height) = state.value.quality.dimensions(snapshot.canvas)
-                val compiled = compiler.compile(snapshot, width, height, preferSingleVisualInput = true, renderText = renderTextInPlayer)
+                val plan = renderPlan?.takeIf { it.project === snapshot }
+                    ?: withContext(Dispatchers.Default) { RenderPlan.derive(snapshot) }
+                val compiled = compiler.compile(plan, width, height, preferSingleVisualInput = true, renderText = renderTextInPlayer)
                 if (generation != revision || !active) return@launch
                 // Legacy multi-input graphs cannot reliably flush their compositor queues after
                 // edits. Single-input graphs can be updated in place; layered graphs start fresh.
@@ -227,9 +248,12 @@ class PreviewEngine(
                 requiresCompositor = compiled.requiresCompositor
                 val output = player ?: createPlayer().also { player = it }
                 appliedGeneration = revision
+                renderPlan = compiled.plan
+                visualIndices = compiled.plan.visuals
                 segmentIds = visualIndices.map { it.clipAt(state.value.positionUs)?.id }
                 configuringPlayer = true
                 try {
+                    hasRenderedFrame = false
                     output.setComposition(compiled.composition, state.value.positionUs / 1000)
                     output.prepare()
                     mutableState.value = state.value.copy(player = output, warnings = compiled.warnings, error = null)
@@ -262,6 +286,10 @@ class PreviewEngine(
                     publishPlayerState()
                 }
 
+                override fun onRenderedFirstFrame() {
+                    if (owner === this@PreviewEngine.player) hasRenderedFrame = true
+                }
+
                 override fun onPlayerError(error: PlaybackException) {
                     if (owner === this@PreviewEngine.player && appliedGeneration == generation && active) {
                         requestedPlaying = false
@@ -292,12 +320,19 @@ class PreviewEngine(
         else output.currentPosition.times(1000).coerceIn(0, project?.durationUs ?: 0)
         if (requiresCompositor && output.isPlaying && positionUs < (project?.durationUs ?: 0)) {
             val nextSegments = visualIndices.map { it.clipAt(positionUs)?.id }
-            if (nextSegments != segmentIds) {
-                // Retain the verified fallback for layered/transformed compositions. Simple
-                // sequences use a single-input graph and keep their decoder across boundaries.
+            // A new item can retain the previous decoded frame in Media3 1.11.1.
+            // A disappearing layer is hidden by timeline alpha and needs no new input frame.
+            if (nextSegments.indices.any { nextSegments[it] != null && nextSegments[it] != segmentIds.getOrNull(it) }) {
                 seek(positionUs)
                 return
             }
+            segmentIds = nextSegments
+        }
+        // Some multi-input compositions never report native EOS even after their clock passes
+        // the declared duration. The project is authoritative; stop transport at its exact end.
+        if (requiresCompositor && positionUs >= (project?.durationUs ?: Long.MAX_VALUE) && requestedPlaying) {
+            requestedPlaying = false
+            output.pause()
         }
         mutableState.value = old.copy(
             positionUs = positionUs,

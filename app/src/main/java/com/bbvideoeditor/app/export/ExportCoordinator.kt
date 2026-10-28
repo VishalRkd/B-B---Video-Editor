@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import android.util.AtomicFile
 import androidx.core.content.ContextCompat
 import com.bbvideoeditor.core.Project
+import com.bbvideoeditor.app.render.RenderEffectRegistry
 import com.bbvideoeditor.core.newId
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,9 +60,10 @@ class ExportCoordinator(private val context: Context) {
         startJob = scope.launch {
             initialized.await()
             if (state.value.active) return@launch
-            val request = ExportRequest(newId(), project.validate(), settings)
+            val request = ExportRequest(newId(), project, settings)
             update(ExportState(request.jobId, project.id, project.name, ExportPhase.PREPARING, detail = "Preparing the render pipeline…"))
             try {
+                withContext(Dispatchers.Default) { project.validate(); RenderEffectRegistry().preflight(project) }
                 withContext(Dispatchers.IO) {
                     val directory = jobDirectory(request.jobId).apply { mkdirs() }
                     writeAtomic(File(directory, "request.json"), json.encodeToString(request))

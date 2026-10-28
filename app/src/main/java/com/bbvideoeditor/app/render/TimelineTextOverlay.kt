@@ -53,6 +53,6 @@ class TimelineTextOverlay(
     }
 
     override fun release() {
-        try { super.release() } finally { activeContent = null; activeFrame = null }
+        try { super.release() } finally { activeContent = null; activeFrame = null; empty.recycle() }
     }
 }

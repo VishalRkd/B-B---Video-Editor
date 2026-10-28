@@ -47,6 +47,7 @@ fun EditorScreen(
     val selected = state.selectedClipId?.let { state.project.findClip(it) }
     val track = selected?.let { state.project.findTrackForClip(it.id) }
     var showProperties by remember { mutableStateOf(false) }
+    var showEffects by remember { mutableStateOf(false) }
     var showCanvas by remember { mutableStateOf(false) }
     var showTracks by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
@@ -106,6 +107,7 @@ fun EditorScreen(
                 Tool("Split", Icons.Default.ContentCut, selected != null && track?.locked == false && state.positionUs > selected.startUs && state.positionUs < selected.endUs) { selected?.let { editor.execute(SplitClip(it.id, state.positionUs)) } }
                 Tool("Delete", Icons.Default.DeleteOutline, selected != null && track?.locked == false) { selected?.let { editor.execute(DeleteClip(it.id)) } }
                 Tool("Duplicate", Icons.Default.ContentCopy, selected != null && track?.locked == false) { selected?.let { editor.execute(DuplicateClip(it.id)) } }
+                Tool("Color", Icons.Default.Palette, selected != null && track?.locked == false && track.type in listOf(TrackType.VIDEO, TrackType.OVERLAY)) { editor.setPlaying(false); showEffects = true }
                 Tool("Adjust", Icons.Default.Tune, selected != null && track?.locked == false) { showProperties = true }
                 Tool("Earlier", Icons.Default.ChevronLeft, selected != null && track?.locked == false) {
                     if (track != null && selected != null) editor.execute(ReorderClip(selected.id, (track.clips.sortedBy { it.startUs }.indexOfFirst { it.id == selected.id } - 1).coerceAtLeast(0)))
@@ -134,6 +136,10 @@ fun EditorScreen(
                     }.exceptionOrNull()?.let { it.message ?: "Unable to save text." }
                 })
         }
+    }
+    if (showEffects && selected != null) ColorEffectsInspector(selected, onDismiss = { showEffects = false }) { effects ->
+        editor.execute(UpdateClip(selected.id, effects = effects))
+        showEffects = false
     }
     if (showProperties && selected != null) ClipProperties(selected, state.project, onDismiss = { showProperties = false }, onApply = { speed, volume, transform ->
         editor.execute(UpdateClip(selected.id, speed = speed, volume = volume, transform = transform)); showProperties = false

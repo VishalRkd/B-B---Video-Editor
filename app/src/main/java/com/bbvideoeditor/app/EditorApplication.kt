@@ -13,9 +13,22 @@ import com.bbvideoeditor.app.export.ExportCoordinator
 class EditorApplication : Application() {
     val projects by lazy { ProjectRepository(this) }
     val importer by lazy { MediaImporter(this) }
-    val thumbnails by lazy { ThumbnailCache(this) }
-    val waveforms by lazy { WaveformRepository(this) }
-    val textBitmaps by lazy { TextBitmapCache() }
+    private val thumbnailCache = lazy { ThumbnailCache(this) }
+    val thumbnails by thumbnailCache
+    private val waveformCache = lazy { WaveformRepository(this) }
+    val waveforms by waveformCache
+    private val textCache = lazy { TextBitmapCache() }
+    val textBitmaps by textCache
     val compiler by lazy { CompositionCompiler(this, textBitmaps = textBitmaps) }
     val exports by lazy { ExportCoordinator(this) }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Drop cache ownership only; UI/GL consumers may still own these bitmaps.
+        if (level >= TRIM_MEMORY_UI_HIDDEN || level == TRIM_MEMORY_RUNNING_LOW || level == TRIM_MEMORY_RUNNING_CRITICAL) {
+            if (thumbnailCache.isInitialized()) thumbnails.clearMemory()
+            if (waveformCache.isInitialized()) waveforms.clearMemory()
+            if (textCache.isInitialized()) textBitmaps.clearMemory()
+        }
+    }
 }

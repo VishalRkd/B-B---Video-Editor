@@ -25,7 +25,8 @@ import com.bbvideoeditor.core.MediaKind
 import com.bbvideoeditor.core.MediaReference
 import com.bbvideoeditor.core.Project
 import com.bbvideoeditor.core.Track
-import com.bbvideoeditor.core.TrackIndex
+import com.bbvideoeditor.core.RenderPlan
+import com.bbvideoeditor.core.RenderTrack
 import com.bbvideoeditor.core.TrackType
 import com.bbvideoeditor.core.Transform
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,7 @@ data class CompiledComposition(
     val height: Int,
     val frameRate: Int,
     val requiresCompositor: Boolean = true,
+    val plan: RenderPlan,
 )
 
 /**
@@ -68,14 +70,25 @@ class CompositionCompiler(
         frameRate: Int = project.canvas.frameRate,
         preferSingleVisualInput: Boolean = false,
         renderText: Boolean = true,
+    ): CompiledComposition = compile(
+        withContext(Dispatchers.Default) { RenderPlan.derive(project) },
+        outputWidth, outputHeight, frameRate, preferSingleVisualInput, renderText,
+    )
+
+    /** Reuse immutable indexes across boundary recovery; runtime effects remain independently owned. */
+    suspend fun compile(
+        plan: RenderPlan,
+        outputWidth: Int = plan.project.canvas.width,
+        outputHeight: Int = plan.project.canvas.height,
+        frameRate: Int = plan.project.canvas.frameRate,
+        preferSingleVisualInput: Boolean = false,
+        renderText: Boolean = true,
     ): CompiledComposition = withContext(Dispatchers.Default) {
-        project.validate()
+        val project = plan.project
+        effects.preflight(project)
         require(project.durationUs > 0) { "Add media or text before previewing or exporting." }
         require(outputWidth in 2..8192 && outputHeight in 2..8192 && outputWidth % 2 == 0 && outputHeight % 2 == 0)
         require(frameRate in 1..120)
-        if (project.timeline.transitions.isNotEmpty()) {
-            throw UnsupportedRenderFeature("Transitions in this project require a transition renderer.")
-        }
         val usedMedia = project.timeline.clips.mapNotNull { it.mediaId }.toSet()
         withContext(Dispatchers.IO) {
             for (id in usedMedia) {
@@ -90,34 +103,27 @@ class CompositionCompiler(
                 }
             }
         }
-        val textTracks = project.timeline.tracks.filter { it.type == TrackType.TEXT && it.clips.isNotEmpty() }
+        val textTracks = plan.text.map { it.track }
         for (track in textTracks) {
-            for (clip in track.clips) {
-                require(clip.effects.none { it.enabled } && clip.properties.isEmpty()) { "Animated text and text effects are not supported yet." }
-            }
             // Prewarm a small window off the render thread. Later captions are cached on demand.
             if (renderText) track.clips.sortedBy { it.startUs }.take(2).forEach { textBitmaps.get(requireNotNull(it.text), project.canvas, outputHeight) }
         }
-        val visualTracks = project.timeline.tracks
-            .filter { (it.type == TrackType.VIDEO || it.type == TrackType.OVERLAY) && it.clips.isNotEmpty() }
-            .reversed()
-        val visualClips = visualTracks.flatMap { it.clips }.sortedBy { it.startUs }
+        val visualTracks = plan.visuals.map { it.track }
+        val visualClips = plan.visualClips
         // With no simultaneous layers or compositor-only edits, all visual clips can share one
         // decoder sequence. Keep this an explicit preview optimization: export still uses the
         // clock-backed graph, and projects needing composition retain their original layer order.
         val useSingleVisualInput = preferSingleVisualInput && (visualClips.isNotEmpty() || textTracks.isNotEmpty()) &&
-            visualClips.all { it.transform == Transform() && it.effects.none { effect -> effect.enabled } } &&
-            visualClips.zipWithNext().all { (previous, next) -> previous.endUs <= next.startUs }
+            visualClips.all { it.transform == Transform() && it.properties.isEmpty() &&
+                it.effects.filter { effect -> effect.enabled }.all { effect -> effects.capability(effect.type)?.singleInput == true } } &&
+            plan.disjointVisuals
         val compiledVisualTracks = if (useSingleVisualInput && visualTracks.isNotEmpty()) {
             listOf(visualTracks.first().copy(clips = visualClips))
         } else visualTracks
         // Decode audio in dedicated sequences, even when it belongs to a video clip. This avoids
         // Media3's force-audio initialization race for mixed image/video/silent sequences and
         // gives every audio stream explicit gaps and the same project timestamps.
-        val audioTracks = project.timeline.tracks.filter { !it.muted }.mapNotNull { track ->
-            val audible = track.clips.filter { project.media[it.mediaId]?.hasAudio == true }
-            if (audible.isEmpty()) null else track.copy(type = TrackType.AUDIO, clips = audible)
-        }
+        val audioTracks = plan.audio.map { it.track }
         val sequenceTracks = compiledVisualTracks + audioTracks
         val sequences = mutableListOf<EditedMediaItemSequence>()
         if (!useSingleVisualInput || visualTracks.isEmpty()) sequences.add(clockSequence(ensureClockAsset(), project.durationUs, frameRate))
@@ -129,9 +135,6 @@ class CompositionCompiler(
             var cursorUs = 0L
             for (clip in track.clips.sortedBy { it.startUs }) {
                 coroutineContext.ensureActive()
-                if (clip.properties.isNotEmpty()) {
-                    throw UnsupportedRenderFeature("Animated clip properties require a property renderer.")
-                }
                 if (clip.startUs > cursorUs) sequence.addGap(clip.startUs - cursorUs)
                 val media = requireNotNull(project.media[clip.mediaId])
                 sequence.addItem(compileClip(clip, media, track, outputWidth, outputHeight, frameRate))
@@ -155,7 +158,7 @@ class CompositionCompiler(
             // every item, including gaps, without requiring a second visual clock input.
             compositionEffects += Presentation.createForWidthAndHeight(outputWidth, outputHeight, Presentation.LAYOUT_SCALE_TO_FIT)
         } else {
-            compositionBuilder.setVideoCompositorSettings(ProjectCompositor(visualTracks, outputWidth, outputHeight))
+            compositionBuilder.setVideoCompositorSettings(ProjectCompositor(plan.visuals, outputWidth, outputHeight))
         }
         // Text tracks form the title/caption stack above the visual composition. Chunking avoids
         // exceeding texture-unit limits on older GPUs while retaining the track stacking order.
@@ -164,7 +167,7 @@ class CompositionCompiler(
         compositionBuilder.setEffects(Effects(emptyList(), compositionEffects))
         CompiledComposition(
             compositionBuilder.build(), project.durationUs, warnings, outputWidth, outputHeight, frameRate,
-            requiresCompositor = requiresCompositor,
+            requiresCompositor = requiresCompositor, plan = plan,
         )
     }
 
@@ -181,13 +184,15 @@ class CompositionCompiler(
             .setMediaId(clip.id)
         if (media.mimeType.isNotBlank()) item.setMimeType(media.mimeType)
         val isImage = media.kind == MediaKind.IMAGE
-        // Images have no intrinsic time. Use the same virtual source range as the project.
-        val sourceDurationUs = if (isImage) clip.sourceRange.endUs else media.durationUs
+        // ImageAssetLoader emits durationUs directly and does not apply source clipping.
+        // Normalize stills to exact timeline duration, including split rounding and speed.
+        // Original virtual source time remains in RenderPlan for property evaluation.
+        val sourceDurationUs = if (isImage) clip.durationUs else media.durationUs
         if (isImage) item.setImageDurationMs((sourceDurationUs + 999L) / 1000L)
         item.setClippingConfiguration(
             MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionUs(clip.sourceRange.startUs)
-                .setEndPositionUs(clip.sourceRange.endUs)
+                .setStartPositionUs(if (isImage) 0 else clip.sourceRange.startUs)
+                .setEndPositionUs(if (isImage) clip.durationUs else clip.sourceRange.endUs)
                 .build(),
         )
         val audioEffects = mutableListOf<androidx.media3.common.audio.AudioProcessor>()
@@ -203,7 +208,7 @@ class CompositionCompiler(
         if (track.type != TrackType.AUDIO) {
             videoEffects += Presentation.createForWidthAndHeight(width, height, Presentation.LAYOUT_SCALE_TO_FIT)
         }
-        for (effect in clip.effects.filter { it.enabled }) {
+        for (effect in clip.effects.filter { it.enabled && track.type != TrackType.AUDIO }) {
             val rendered = effects.create(effect, clip, media)
             audioEffects += rendered.audioProcessors
             videoEffects += rendered.videoEffects
@@ -212,7 +217,7 @@ class CompositionCompiler(
             .setDurationUs(sourceDurationUs)
             .setFrameRate(frameRate)
             .setEffects(Effects(audioEffects, videoEffects))
-            .setSpeed(ClipSpeedProvider(clip))
+        if (!isImage) builder.setSpeed(ClipSpeedProvider(clip))
         if (track.type == TrackType.AUDIO) builder.setRemoveVideo(true)
         else builder.setRemoveAudio(true)
         return builder.build()
@@ -254,16 +259,15 @@ class CompositionCompiler(
 
 /** Input 0 is the clock; visual inputs 1..n are registered from topmost layer to bottommost. */
 @UnstableApi
-private class ProjectCompositor(tracks: List<Track>, private val width: Int, private val height: Int) : VideoCompositorSettings {
-    private val indices = tracks.map(::TrackIndex)
+private class ProjectCompositor(private val tracks: List<RenderTrack>, private val width: Int, private val height: Int) : VideoCompositorSettings {
     private val hidden = object : OverlaySettings { override fun getAlphaScale(): Float = 0f }
 
     override fun getOutputSize(inputSizes: MutableList<Size>): Size = Size(width, height)
 
     override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
         if (inputId == 0) return hidden
-        val clip = indices.getOrNull(inputId - 1)?.clipAt(presentationTimeUs) ?: return hidden
-        val transform = clip.transform
+        val state = tracks.getOrNull(inputId - 1)?.stateAt(presentationTimeUs) ?: return hidden
+        val transform = state.transform
         return object : OverlaySettings {
             override fun getAlphaScale(): Float = transform.opacity
             override fun getScale(): Pair<Float, Float> = Pair.create(transform.scaleX, transform.scaleY)

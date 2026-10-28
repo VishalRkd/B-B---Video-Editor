@@ -67,12 +67,12 @@ class PreviewCompilationTest {
         assertEquals(first.id, firstItem.mediaItem.mediaId)
         assertEquals(second.id, secondItem.mediaItem.mediaId)
         assertEquals(red.uri, firstItem.mediaItem.localConfiguration!!.uri.toString())
-        assertEquals(first.sourceRange.startUs, firstItem.mediaItem.clippingConfiguration.startPositionUs)
-        assertEquals(first.sourceRange.endUs, firstItem.mediaItem.clippingConfiguration.endPositionUs)
-        assertEquals(first.sourceRange.endUs, firstItem.durationUs) // Image virtual source duration.
-        assertEquals(first.speed, firstItem.speedProvider.getSpeed(0), 0f)
-        assertEquals(second.sourceRange.startUs, secondItem.mediaItem.clippingConfiguration.startPositionUs)
-        assertEquals(second.sourceRange.endUs, secondItem.mediaItem.clippingConfiguration.endPositionUs)
+        assertEquals(0L, firstItem.mediaItem.clippingConfiguration.startPositionUs)
+        assertEquals(first.durationUs, firstItem.mediaItem.clippingConfiguration.endPositionUs)
+        assertEquals(first.durationUs, firstItem.durationUs) // ImageAssetLoader ignores source clipping.
+        assertEquals(1f, firstItem.speedProvider.getSpeed(0), 0f)
+        assertEquals(0L, secondItem.mediaItem.clippingConfiguration.startPositionUs)
+        assertEquals(second.durationUs, secondItem.mediaItem.clippingConfiguration.endPositionUs)
         assertTrue(firstItem.removeAudio)
         assertTrue(secondItem.removeAudio)
 

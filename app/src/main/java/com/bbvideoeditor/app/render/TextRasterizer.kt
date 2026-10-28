@@ -27,10 +27,13 @@ class TextBitmapCache {
     }
 
     // Call on a worker/render thread. Eviction never recycles bitmaps still held by UI/GL consumers.
+    @Synchronized
     fun get(content: TextContent, canvas: CanvasSettings, outputHeight: Int): RasterizedText {
         val key = Key(content, canvas.width, canvas.height, outputHeight)
         return cache.get(key) ?: TextRasterizer.render(content, canvas, outputHeight).also { cache.put(key, it) }
     }
+    // LruCache is thread-safe. Main-thread trim callbacks must not wait on rasterization's lock.
+    fun clearMemory() = cache.evictAll()
 }
 
 object TextRasterizer {
