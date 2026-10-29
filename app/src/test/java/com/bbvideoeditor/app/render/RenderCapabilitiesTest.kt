@@ -10,6 +10,29 @@ class RenderCapabilitiesTest {
     private fun project(c: Clip = clip, type: TrackType = TrackType.VIDEO) = Project(media = mapOf(media.id to media), timeline = Timeline(listOf(Track(name = "track", type = type, clips = listOf(c)))))
     private val registry = RenderEffectRegistry()
 
+    @Test fun visualFactoriesCannotSilentlyDiscardAudioEffects() {
+        val typed=RenderEffectRegistry(listOf(RegisteredRenderEffect(RenderEffectDescriptor("audio-in-visual",emptyList()),
+            RenderEffectFactory { _,_,_->androidx.media3.transformer.Effects(listOf(ClipDurationAudioProcessor(1_000_000)),emptyList()) })))
+        assertThrows(UnsupportedRenderFeature::class.java){typed.create(EffectSpec(type="audio-in-visual"),clip,media)}
+    }
+
+    @Test fun customRegistrationRejectsDuplicateIdsAndUnsupportedStagesBeforeAllocatingEffects() {
+        val factory=RenderEffectFactory { _,_,_->error("Validation allocated runtime effects") }
+        val descriptor=RenderEffectDescriptor("typed-test",listOf(EffectParameter("amount",.5f,0f..1f)))
+        val registered=RegisteredRenderEffect(descriptor,factory)
+        assertThrows(IllegalArgumentException::class.java){RenderEffectRegistry(listOf(registered,registered))}
+        assertThrows(IllegalArgumentException::class.java){RenderEffectRegistry(listOf(registered.copy(descriptor=descriptor.copy(type="brightness"))))}
+        val typed=RenderEffectRegistry(listOf(registered))
+        typed.validate(EffectSpec(type="typed-test"))
+        for(parameters in listOf(mapOf("unknown" to 0f),mapOf("amount" to 2f),mapOf("amount" to Float.NaN))) {
+            assertEquals(RenderProblem.InvalidEffectParameter,assertThrows(RenderCapabilityException::class.java){
+                typed.validate(EffectSpec(type="typed-test",parameters=parameters))
+            }.problem)
+        }
+        val twoInputs=RenderEffectRegistry(listOf(registered.copy(descriptor=descriptor.copy(inputCount=2))))
+        assertThrows(UnsupportedRenderFeature::class.java){twoInputs.validate(EffectSpec(type="typed-test"))}
+    }
+
     @Test fun shippedEffectsHaveParityCapabilitiesAndAllowSingleInputRendering() {
         ColorAdjustments.all.forEach { definition ->
             val capability = requireNotNull(registry.capability(definition.type))

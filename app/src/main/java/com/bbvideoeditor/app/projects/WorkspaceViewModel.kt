@@ -28,6 +28,7 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
     private val app = application as EditorApplication
     private val mutableState = MutableStateFlow(WorkspaceState(busy = true))
     val state = mutableState.asStateFlow()
+    private var assetLease:AutoCloseable?=null
     private var saveJob: Job? = null
     private var importJob: Job? = null
 
@@ -36,6 +37,7 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
     fun refresh() = viewModelScope.launch {
         try {
             val projects = app.projects.list()
+            app.assets.collectOrphans()
             mutableState.value = state.value.copy(projects = projects, busy = false,
                 message = app.projects.issues.value.takeIf { it.isNotEmpty() }?.joinToString("\n"))
         }
@@ -56,6 +58,8 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
 
     private suspend fun openProject(project: Project) {
         val editor = EditorViewModel(project)
+        val lease=app.assets.acquire(editor)
+        assetLease?.close();assetLease=lease
         editor.onProjectChanged = { changed ->
             saveJob?.cancel()
             saveJob = viewModelScope.launch {
@@ -86,12 +90,13 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
         try {
             app.projects.save(editor.state.value.project)
             editor.onProjectChanged = {}
+            assetLease?.close();assetLease=null
             mutableState.value = state.value.copy(editor = null, projects = app.projects.list(), missingMedia = emptyList())
         } catch (e: Exception) { if (e is CancellationException) throw e; editor.message("Could not save: ${e.message}") }
     }
 
     fun delete(id: String) = viewModelScope.launch {
-        try { app.projects.delete(id); refresh() }
+        try { app.projects.delete(id); app.assets.collectOrphans(); refresh() }
         catch (e: Exception) { if (e is CancellationException) throw e; report(e) }
     }
 
@@ -137,6 +142,8 @@ class WorkspaceViewModel(application: Application) : AndroidViewModel(applicatio
             } finally { mutableState.value = state.value.copy(importing = false) }
         }
     }
+
+    override fun onCleared(){assetLease?.close();assetLease=null;super.onCleared()}
 
     fun dismissMessage() { mutableState.value = state.value.copy(message = null) }
     private fun report(error: Exception) { mutableState.value = state.value.copy(busy = false, message = error.message ?: "The project could not be opened.") }

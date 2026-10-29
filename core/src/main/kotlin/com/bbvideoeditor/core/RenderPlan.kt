@@ -77,6 +77,7 @@ object RenderProperties {
 class RenderTrack(val track: Track) {
     private val index = TrackIndex(track)
     fun clipAt(timeUs: Long): Clip? = index.clipAt(timeUs)
+    fun clipsInRange(startUs:Long,endUs:Long):List<Clip> = index.visibleClips(startUs,endUs)
     fun stateAt(timeUs: Long): ClipRenderState? = clipAt(timeUs)?.let {
         ClipRenderState(it, timeUs, it.sourceTimeAt(timeUs), RenderProperties.transformAt(it, timeUs))
     }
@@ -103,6 +104,18 @@ class RenderPlan private constructor(val project: Project) {
     }
     val visualClips = visuals.flatMap { it.track.clips }.sortedBy { it.startUs }
     val disjointVisuals = visualClips.zipWithNext().all { (a, b) -> a.endUs <= b.startUs }
+    private val transitionWindows by lazy { project.timeline.transitions.map { TransitionWindow.schedule(project, it) } }
+    fun evaluateFrame(timeUs: Long): EvaluatedFrameState {
+        val time = OutputFrameTime(timeUs)
+        val visual = visuals.mapIndexedNotNull { order, track -> track.evaluate(time, order) }
+        val transitions = transitionWindows.filter { timeUs in it.range }.map { window ->
+            EvaluatedTransition(window, visual.first { it.clip.id == window.outgoing.id },
+                visual.first { it.clip.id == window.incoming.id }, window.progressAt(timeUs))
+        }
+        return EvaluatedFrameState(time, project.canvas, visual,
+            audio.mapIndexedNotNull { order, track -> track.evaluate(time, order) },
+            text.mapIndexedNotNull { order, track -> track.evaluate(time, order) }, transitions)
+    }
     fun frameAt(timeUs: Long) = RenderFrame(visuals.mapNotNull { it.stateAt(timeUs) },
         audio.mapNotNull { it.stateAt(timeUs) }, text.mapNotNull { it.stateAt(timeUs) })
 

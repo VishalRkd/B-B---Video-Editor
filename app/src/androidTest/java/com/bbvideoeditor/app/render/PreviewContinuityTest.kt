@@ -228,7 +228,7 @@ class PreviewContinuityTest {
                             val time = change.substringBefore("us:").toLong()
                             permittedRestarts.any { abs(time - it) < 170_000 }
                         })
-                        assertEquals("Expected one detach and one replacement per visual boundary: $diagnostics", permittedRestarts.size * 2, trace.playerChanges.size)
+                        assertEquals("A stable layered graph must retain its player at every visual boundary: $diagnostics", 0, trace.playerChanges.size)
                     }
                     assertTrue("Clock moved backwards: $diagnostics", trace.clockRegressions.isEmpty())
                     if (permittedRestarts.isEmpty()) assertTrue("Playback paused before the end: $diagnostics", trace.earlyStops.isEmpty())
@@ -312,7 +312,7 @@ class PreviewContinuityTest {
     private fun assertPausedSeek(engine: PreviewEngine, view: PlayerView, expectedPlayer: Player,
                                  positionUs: Long, expectedColor: Int) {
         onMain { engine.seek(positionUs) }
-        await("paused seek to $positionUs us, expected ${hex(expectedColor)}") {
+        await("paused seek to $positionUs us, expected ${hex(expectedColor)}", {"${engine.state.value}; ${onMain{engine.diagnostics.events()}}"}) {
             val state = engine.state.value
             assertNull("Preview failed seeking to $positionUs us", state.error)
             assertTrue("Paused seek to $positionUs us replaced or detached the player", state.player === expectedPlayer)
@@ -357,10 +357,10 @@ class PreviewContinuityTest {
 
     private fun hex(color: Int) = Integer.toHexString(color)
 
-    private fun await(label: String, predicate: () -> Boolean) {
+    private fun await(label: String, diagnostics:()->String={""}, predicate: () -> Boolean) {
         val deadlineMs = SystemClock.elapsedRealtime() + 20_000
         while (!predicate()) {
-            if (SystemClock.elapsedRealtime() >= deadlineMs) fail("Timed out waiting for $label")
+            if (SystemClock.elapsedRealtime() >= deadlineMs) fail("Timed out waiting for $label; ${diagnostics()}")
             Thread.sleep(20)
         }
     }

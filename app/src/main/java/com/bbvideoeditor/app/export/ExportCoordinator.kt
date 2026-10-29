@@ -21,7 +21,7 @@ import java.io.File
 
 /** Application-owned job status survives navigation; snapshots isolate a running export from edits. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-class ExportCoordinator(private val context: Context) {
+class ExportCoordinator(private val context: Context, private val root:File = File(context.filesDir,"exports")) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(ExportState())
     val state = mutableState.asStateFlow()
@@ -31,29 +31,28 @@ class ExportCoordinator(private val context: Context) {
     private val initialized = scope.async {
         withContext(Dispatchers.IO) {
             val previous = runCatching { json.decodeFromString<ExportState>(AtomicFile(statusFile()).openRead().bufferedReader().use { it.readText() }) }.getOrNull()
+            var completedPublication:Uri?=null
             // No service survives process death. Remove partial private renders and pending rows.
-            File(context.filesDir, "exports").listFiles().orEmpty().filter { it.isDirectory }.forEach { directory ->
-                File(directory, "render.mp4").delete()
-                val journal = File(directory, "pending_uri.txt")
-                if (journal.exists()) {
-                    runCatching {
-                        val uri = Uri.parse(journal.readText())
-                        if (Build.VERSION.SDK_INT >= 29) {
-                            context.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.IS_PENDING), null, null, null)?.use { cursor ->
-                                if (cursor.moveToFirst() && cursor.getInt(0) == 1) context.contentResolver.delete(uri, null, null)
-                            }
-                        }
-                    }
-                    journal.delete()
-                }
+            root.listFiles().orEmpty().filter { it.isDirectory }.forEach { directory ->
+                val recovery=PublicationJournal.recover(context,directory)
+                if(directory.name==previous?.jobId)completedPublication=recovery.completedUri
+                File(directory,"render.mp4").delete()
                 File(directory, "request.json").delete()
                 directory.delete()
             }
-            previous
+            previous?.let { saved ->
+                val recovered=if(saved.active && completedPublication!=null)
+                    saved.copy(phase=ExportPhase.SUCCEEDED,outputUri=completedPublication.toString(),error=null,detail="Recovered the completed video after interruption.")
+                else if(saved.active)saved.copy(phase=ExportPhase.FAILED,error="The previous export was interrupted. Open its project and export again.") else saved
+                runCatching{writeAtomic(statusFile(),json.encodeToString(recovered))}
+                recovered
+            }
         }?.let { saved ->
             mutableState.value = if (saved.active) saved.copy(phase = ExportPhase.FAILED, error = "The previous export was interrupted. Open its project and export again.") else saved
         }
     }
+
+    internal suspend fun awaitRecovery(){initialized.await()}
 
     fun start(project: Project, settings: ExportSettings) {
         if (state.value.active || startJob?.isActive == true) return
@@ -100,9 +99,9 @@ class ExportCoordinator(private val context: Context) {
 
     fun jobDirectory(id: String): File {
         require(java.util.UUID.fromString(id).toString() == id)
-        return File(context.filesDir, "exports/$id")
+        return File(root,id)
     }
-    private fun statusFile(): File = File(context.filesDir, "exports/status.json").also { it.parentFile?.mkdirs() }
+    private fun statusFile(): File = File(root,"status.json").also { it.parentFile?.mkdirs() }
     private fun writeAtomic(file: File, text: String) {
         val atomic = AtomicFile(file)
         val output = atomic.startWrite()

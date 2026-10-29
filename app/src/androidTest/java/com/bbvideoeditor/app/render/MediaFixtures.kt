@@ -55,7 +55,7 @@ internal class MediaFixtures(private val context: Context) {
             durationUs = 2_000_000, hasAudio = true, mimeType = "audio/wav", sizeBytes = file.length())
     }
 
-    fun video(name: String, red: Float, green: Float, blue: Float): MediaReference {
+    fun video(name: String, red: Float, green: Float, blue: Float, fps: Int = 30, frames: Int = 60, drawFrame: ((Int) -> Unit)? = null): MediaReference {
         val file = File(directory, "$name.mp4")
         val codec = MediaCodec.createEncoderByType("video/avc")
         val muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -64,7 +64,7 @@ internal class MediaFixtures(private val context: Context) {
         val format = MediaFormat.createVideoFormat("video/avc", 320, 180).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, 600_000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, 30)
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -109,11 +109,12 @@ internal class MediaFixtures(private val context: Context) {
             }
         }
         try {
-            for (frame in 0 until 60) {
+            for (frame in 0 until frames) {
                 GLES20.glViewport(0, 0, 320, 180)
                 GLES20.glClearColor(red, green, blue, 1f)
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                EGLExt.eglPresentationTimeANDROID(display, eglSurface, frame * 1_000_000_000L / 30)
+                drawFrame?.invoke(frame)
+                EGLExt.eglPresentationTimeANDROID(display, eglSurface, frame * 1_000_000_000L / fps)
                 check(EGL14.eglSwapBuffers(display, eglSurface))
                 drain(false)
             }
@@ -137,6 +138,6 @@ internal class MediaFixtures(private val context: Context) {
             requireNotNull(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)).toLong() * 1000
         } finally { retriever.release() }
         return MediaReference(uri = Uri.fromFile(file).toString(), displayName = name, kind = MediaKind.VIDEO,
-            durationUs = durationUs, width = 320, height = 180, frameRate = 30f, mimeType = "video/mp4", sizeBytes = file.length())
+            durationUs = durationUs, width = 320, height = 180, frameRate = fps.toFloat(), mimeType = "video/mp4", sizeBytes = file.length())
     }
 }

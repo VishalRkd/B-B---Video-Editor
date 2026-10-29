@@ -32,6 +32,35 @@ class TextPlaybackTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
 
+    @Test fun seekingToLateCaptionsPrewarmsTheCurrentWindowBeforeNativeRendering() {
+        val cache=TextBitmapCache(4*1024*1024)
+        val compiler=CompositionCompiler(context,textBitmaps=cache)
+        val captions=(0 until 80).map { index -> Clip(startUs=index*1_000_000L,sourceRange=TimeRange(0,800_000),
+            text=TextContent("Caption $index",fontSize=120f,backgroundColor=if(index%2==0)0xFFFF0000 else 0xFF0000FF)) }
+        val project=Project(canvas=CanvasSettings(320,180),timeline=Timeline(listOf(Track(name="Captions",type=TrackType.TEXT,clips=captions))))
+        val engine=main{PreviewEngine(context,compiler)}
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var view:PlayerView
+            var binding:Job?=null
+            try {
+                scenario.onActivity { activity ->
+                    view=PlayerView(activity).apply{useController=false};activity.setContentView(view)
+                    binding=CoroutineScope(Dispatchers.Main.immediate).launch{engine.state.collect{view.player=it.player}}
+                    engine.updateProject(project)
+                }
+                await{assertNull(engine.state.value.error);engine.state.value.submittedPositionUs!=null}
+                val misses=cache.renderMisses.get()
+                for(index in listOf(70,31,79,4)) {
+                    main{engine.seek(index*1_000_000L+400_000)}
+                    await{assertNull(engine.state.value.error);!engine.state.value.buffering && frameColor(view)==if(index%2==0)Color.RED else Color.BLUE}
+                }
+                assertEquals("Late-caption seek rasterized through the render fallback",misses,cache.renderMisses.get())
+                assertTrue(cache.memoryBytes<=4*1024*1024)
+                assertEquals(1L,main{engine.diagnostics.snapshot().playerCreates})
+            }finally{main{binding?.cancel();view.player=null;engine.close()}}
+        }
+    }
+
     private fun project(): Project = Project(canvas = CanvasSettings(1280, 720), timeline = Timeline(listOf(
         Track(name = "Captions", type = TrackType.TEXT, clips = listOf(
             Clip(id = "red", startUs = 200_000, sourceRange = TimeRange(0, 700_000), text = TextContent("FIRST", fontSize = 180f, backgroundColor = 0xFFFF0000)),

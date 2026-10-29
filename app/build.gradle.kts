@@ -7,7 +7,8 @@ plugins {
 
 android {
     namespace = "com.bbvideoeditor.app"
-    compileSdk = 36
+    compileSdk = 37
+    compileSdkMinor = 0
 
     defaultConfig {
         applicationId = "com.bbvideoeditor.app"
@@ -18,8 +19,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    testBuildType = providers.gradleProperty("foundationTestBuildType").orElse("debug").get()
+
     buildTypes {
+        debug { manifestPlaceholders["foundationProfileable"] = false }
+        create("profile") {
+            initWith(getByName("debug"))
+            isDebuggable = false
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("debug")
+            manifestPlaceholders["foundationProfileable"] = true
+        }
         release {
+            manifestPlaceholders["foundationProfileable"] = false
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -57,8 +70,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    add("profileImplementation", "androidx.compose.ui:ui-test-manifest")
 
-    val media3Version = "1.11.1"
+    val media3Version = "1.12.0-alpha02"
     implementation("androidx.media3:media3-common:$media3Version")
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-ui:$media3Version")

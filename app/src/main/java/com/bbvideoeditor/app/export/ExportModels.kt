@@ -50,8 +50,35 @@ data class ExportSettings(
 
 data class EncoderCapability(val codec: VideoCodec, val width: Int, val height: Int, val frameRate: Int, val supported: Boolean, val hardware: Boolean)
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object ExportCapabilities {
+    private val observedFallbacks=java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private var context:android.content.Context?=null
+    private var observationsLoaded=false
+    private val observationLock=Any()
+    /** No disk work during application startup. Probes/render completion load on workers. */
+    internal fun configure(context:android.content.Context){this.context=context.applicationContext}
+    private val observationPrefix get()="foundation-v1|${androidx.media3.common.MediaLibraryInfo.VERSION}|${Build.FINGERPRINT}|"
+    private fun key(codec:VideoCodec,width:Int,height:Int,fps:Int)="$observationPrefix${codec.mime}|$width|$height|$fps"
+    private fun loadObservations()=synchronized(observationLock) {
+        if(observationsLoaded)return@synchronized
+        val app=context ?: return@synchronized
+        observedFallbacks+=app.getSharedPreferences("export_dimension_observations_v1",android.content.Context.MODE_PRIVATE)
+            .getStringSet("fallbacks",emptySet()).orEmpty().filter{it.startsWith(observationPrefix)}
+        observationsLoaded=true
+    }
+    internal fun recordObservedOutput(project:Project,settings:ExportSettings,width:Int,height:Int) {
+        loadObservations()
+        val requested=settings.dimensions(project)
+        if(requested.first!=width || requested.second!=height) {
+            observedFallbacks+=key(settings.codec,requested.first,requested.second,settings.frameRate)
+            while(observedFallbacks.size>128){observedFallbacks.firstOrNull()?.let(observedFallbacks::remove) ?: break}
+            context?.getSharedPreferences("export_dimension_observations_v1",android.content.Context.MODE_PRIVATE)?.edit()
+                ?.putStringSet("fallbacks",observedFallbacks.toList().takeLast(128).toSet())?.apply()
+        }
+    }
     suspend fun inspect(project: Project): List<EncoderCapability> = withContext(Dispatchers.Default) {
+        withContext(Dispatchers.IO){loadObservations()}
         val encoders = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { it.isEncoder }
         buildList {
             for (codec in VideoCodec.entries) for (resolution in listOf(720, 1080, 2160)) for (fps in listOf(24, 25, 30, 50, 60)) {
@@ -64,7 +91,7 @@ object ExportCapabilities {
                         } == true
                     }.getOrDefault(false)
                 }
-                add(EncoderCapability(codec, width, height, fps, matching.isNotEmpty(), matching.any {
+                add(EncoderCapability(codec, width, height, fps, matching.isNotEmpty() && key(codec,width,height,fps) !in observedFallbacks, matching.any {
                     if (Build.VERSION.SDK_INT >= 29) it.isHardwareAccelerated else !it.name.startsWith("OMX.google.") && !it.name.startsWith("c2.android.")
                 }))
             }

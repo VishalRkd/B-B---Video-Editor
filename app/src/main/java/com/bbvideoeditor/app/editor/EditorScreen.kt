@@ -43,7 +43,7 @@ fun EditorScreen(
     waveforms: WaveformRepository? = null,
     textBitmaps: TextBitmapCache? = null,
 ) {
-    val state by editor.state.collectAsStateWithLifecycle()
+    val state by editor.document.collectAsStateWithLifecycle()
     val selected = state.selectedClipId?.let { state.project.findClip(it) }
     val track = selected?.let { state.project.findTrackForClip(it.id) }
     var showProperties by remember { mutableStateOf(false) }
@@ -80,22 +80,8 @@ fun EditorScreen(
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(formatTime(state.positionUs, true), color = Accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Text("/ ${formatTime(state.project.durationUs, true)}", color = Muted, fontSize = 10.sp)
-                }
-                IconButton(onClick = { editor.seek(state.positionUs - state.project.canvas.frameDurationUs); editor.endScrub() }, enabled = state.positionUs > 0) { Icon(Icons.Default.SkipPrevious, "Previous frame", Modifier.size(20.dp)) }
-                FilledIconButton(onClick = { editor.setPlaying(!state.playing) }, enabled = state.project.durationUs > 0,
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = Accent, contentColor = Ink)) {
-                    Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) "Pause" else "Play")
-                }
-                IconButton(onClick = { editor.seek(state.positionUs + state.project.canvas.frameDurationUs); editor.endScrub() }, enabled = state.positionUs < state.project.durationUs) { Icon(Icons.Default.SkipNext, "Next frame", Modifier.size(20.dp)) }
-                Spacer(Modifier.weight(.3f))
-                IconButton(onClick = editor::undo, enabled = state.canUndo, modifier = Modifier.size(36.dp)) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo", Modifier.size(19.dp)) }
-                IconButton(onClick = editor::redo, enabled = state.canRedo, modifier = Modifier.size(36.dp)) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo", Modifier.size(19.dp)) }
-            }
-            TimelineView(state, editor, thumbnails, Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 315.dp).weight(.85f), waveforms)
+            TransportControls(editor, state)
+            TimelineView(editor, thumbnails, Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 315.dp).weight(.85f), waveforms)
             HorizontalDivider(color = PanelRaised)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Tool("Media", Icons.Default.Add, !importing) { onImport(TrackType.VIDEO) }
@@ -104,7 +90,7 @@ fun EditorScreen(
                 Tool("Text", Icons.Default.TextFields) { editor.setPlaying(false); newTextCaption = false }
                 Tool("Caption", Icons.Default.Subtitles) { editor.setPlaying(false); newTextCaption = true }
                 if (selected?.text != null) Tool("Edit text", Icons.Default.Edit, track?.locked == false) { editor.setPlaying(false); editor.editText(selected.id) }
-                Tool("Split", Icons.Default.ContentCut, selected != null && track?.locked == false && state.positionUs > selected.startUs && state.positionUs < selected.endUs) { selected?.let { editor.execute(SplitClip(it.id, state.positionUs)) } }
+                SplitTool(editor, selected, track)
                 Tool("Delete", Icons.Default.DeleteOutline, selected != null && track?.locked == false) { selected?.let { editor.execute(DeleteClip(it.id)) } }
                 Tool("Duplicate", Icons.Default.ContentCopy, selected != null && track?.locked == false) { selected?.let { editor.execute(DuplicateClip(it.id)) } }
                 Tool("Color", Icons.Default.Palette, selected != null && track?.locked == false && track.type in listOf(TrackType.VIDEO, TrackType.OVERLAY)) { editor.setPlaying(false); showEffects = true }
@@ -123,7 +109,8 @@ fun EditorScreen(
     val editingText = state.editTextClipId?.let { state.project.findClip(it) }?.takeIf { it.text != null }
     if (newTextCaption != null || editingText != null) {
         key(editingText?.id, newTextCaption) {
-            TextEditorDialog(editingText, newTextCaption == true, state.positionUs, state.project, textCache,
+            val dialogTransport by editor.transport.collectAsStateWithLifecycle()
+            TextEditorDialog(editingText, newTextCaption == true, dialogTransport.positionUs, state.project, textCache,
                 onDismiss = { newTextCaption = null; editor.editText(null) }, onSave = { content, startUs, durationUs ->
                     runCatching {
                         val clip = editingText ?: Clip(startUs = startUs, sourceRange = TimeRange(0, durationUs), text = content,
@@ -176,6 +163,35 @@ fun EditorScreen(
         AlertDialog(onDismissRequest = { showRename = false }, title = { Text("Project name") }, text = { OutlinedTextField(name, { name = it }, singleLine = true) },
             confirmButton = { TextButton(onClick = { editor.execute(RenameProject(name.trim())); showRename = false }, enabled = name.isNotBlank()) { Text("Save") } },
             dismissButton = { TextButton(onClick = { showRename = false }) { Text("Cancel") } })
+    }
+}
+
+@Composable
+private fun TransportControls(editor: EditorViewModel, state: EditorDocumentState) {
+    val transport by editor.transport.collectAsStateWithLifecycle()
+    Row(Modifier.fillMaxWidth().height(54.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(formatTime(transport.positionUs, true), color = Accent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text("/ ${formatTime(state.project.durationUs, true)}", color = Muted, fontSize = 10.sp)
+        }
+        IconButton(onClick = { editor.seek(transport.positionUs - state.project.canvas.frameDurationUs); editor.endScrub() }, enabled = transport.positionUs > 0) { Icon(Icons.Default.SkipPrevious, "Previous frame", Modifier.size(20.dp)) }
+        FilledIconButton(onClick = { editor.setPlaying(!transport.playing) }, enabled = state.project.durationUs > 0,
+            colors = IconButtonDefaults.filledIconButtonColors(containerColor = Accent, contentColor = Ink)) {
+            Icon(if (transport.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (transport.playing) "Pause" else "Play")
+        }
+        IconButton(onClick = { editor.seek(transport.positionUs + state.project.canvas.frameDurationUs); editor.endScrub() }, enabled = transport.positionUs < state.project.durationUs) { Icon(Icons.Default.SkipNext, "Next frame", Modifier.size(20.dp)) }
+        Spacer(Modifier.weight(.3f))
+        IconButton(onClick = editor::undo, enabled = state.canUndo, modifier = Modifier.size(36.dp)) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo", Modifier.size(19.dp)) }
+        IconButton(onClick = editor::redo, enabled = state.canRedo, modifier = Modifier.size(36.dp)) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo", Modifier.size(19.dp)) }
+    }
+}
+
+@Composable
+private fun SplitTool(editor: EditorViewModel, selected: Clip?, track: Track?) {
+    val transport by editor.transport.collectAsStateWithLifecycle()
+    Tool("Split", Icons.Default.ContentCut, selected != null && track?.locked == false &&
+        transport.positionUs > selected.startUs && transport.positionUs < selected.endUs) {
+        selected?.let { editor.execute(SplitClip(it.id, editor.transport.value.positionUs)) }
     }
 }
 

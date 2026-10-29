@@ -82,7 +82,7 @@ private fun Workspace(workspace: WorkspaceViewModel) {
     if (editor == null) {
         ProjectsScreen(state, { workspace.create(it) }, { workspace.open(it) }, { workspace.delete(it) })
     } else key(editor) {
-        val editorState by editor.state.collectAsStateWithLifecycle()
+        val editorState by editor.document.collectAsStateWithLifecycle()
         EditorSession(editor, app, state.importing, exportVisible || exportStatus.active,
             onBack = { workspace.closeEditor() },
             onImport = { type ->
@@ -113,17 +113,17 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
     var quality by rememberSaveable {
         mutableStateOf(PreviewQuality.entries.firstOrNull { it.name == preferences.getString("quality", null) } ?: PreviewQuality.BALANCED)
     }
-    var qualityMenu by remember { mutableStateOf(false) }
     val engine = remember(editor) {
         PreviewEngine(app, app.compiler, initialPositionUs = editor.state.value.positionUs, initialQuality = quality, renderTextInPlayer = false)
     }
-    val state by editor.state.collectAsStateWithLifecycle()
-    val playback by engine.state.collectAsStateWithLifecycle()
+    val state by editor.document.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val currentlyExporting by rememberUpdatedState(exporting)
     LaunchedEffect(state.project) { engine.updateProject(state.project) }
     // Transport intent keeps Pause available while the requested playback is buffering.
-    LaunchedEffect(playback.positionUs, playback.playWhenReady) { editor.updatePlayback(playback.positionUs, playback.playWhenReady) }
+    LaunchedEffect(engine, editor) {
+        engine.state.collect { current -> editor.updatePlayback(current.positionUs, current.playWhenReady) }
+    }
     LaunchedEffect(quality) { engine.setQuality(quality) }
     LaunchedEffect(exporting) {
         if (exporting || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) engine.suspendPlayback()
@@ -157,8 +157,22 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
         }
     }
     EditorScreen(editor, app.thumbnails, importing, onBack, onImport, onExport, preview = { modifier ->
+        PreviewCanvas(modifier, engine, editor, app, state.project, quality) { option ->
+            quality = option
+            preferences.edit().putString("quality", option.name).apply()
+        }
+    }, waveforms = app.waveforms, textBitmaps = app.textBitmaps)
+}
+
+@UnstableApi
+@Composable
+private fun PreviewCanvas(modifier: Modifier, engine: PreviewEngine, editor: EditorViewModel,
+    app: EditorApplication, project: com.bbvideoeditor.core.Project, quality: PreviewQuality,
+    onQuality: (PreviewQuality) -> Unit) {
+    val playback by engine.surface.collectAsStateWithLifecycle()
+    var qualityMenu by remember { mutableStateOf(false) }
         Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
-            if (state.project.durationUs == 0L) EmptyPreview(Modifier.fillMaxSize())
+            if (project.durationUs == 0L) EmptyPreview(Modifier.fillMaxSize())
             else {
                 AndroidView(factory = { context ->
                     PlayerView(context).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER); setShutterBackgroundColor(android.graphics.Color.BLACK) }
@@ -169,21 +183,20 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
                     Surface(color = Panel.copy(alpha = .96f), modifier = Modifier.padding(16.dp)) {
                         Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(error, fontSize = 12.sp)
-                            TextButton(onClick = { engine.updateProject(state.project); engine.resume() }) { Text("Retry preview") }
+                            TextButton(onClick = { engine.updateProject(project); engine.resume() }) { Text("Retry preview") }
                         }
                     }
                 }
                 Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
                     Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
                         TextButton(onClick = { qualityMenu = true }) {
-                            Text("Preview · ${quality.label}", color = Color.White, fontSize = 11.sp)
+                            Text("Preview · ${playback.effectiveQuality.label}${if(playback.optimized) " · Optimized" else ""}", color = Color.White, fontSize = 11.sp)
                         }
                     }
                     DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
                         PreviewQuality.entries.forEach { option ->
                             DropdownMenuItem(text = { Text(option.label) }, onClick = {
-                                quality = option
-                                preferences.edit().putString("quality", option.name).apply()
+                                onQuality(option)
                                 qualityMenu = false
                             })
                         }
@@ -192,5 +205,4 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
                 }
             }
         }
-    }, waveforms = app.waveforms, textBitmaps = app.textBitmaps)
 }

@@ -4,7 +4,7 @@ A native Android video editor built with Kotlin, Jetpack Compose, and Media3. Th
 
 ## Build and install
 
-Requires JDK 17 and Android SDK 36. Set `sdk.dir` in your local, untracked `local.properties` or configure `ANDROID_HOME`.
+Requires JDK 17 and Android SDK 37.0 (target SDK remains 36). Set `sdk.dir` in your local, untracked `local.properties` or configure `ANDROID_HOME`.
 
 ```sh
 ./gradlew :app:assembleDebug :core:test :app:testDebugUnitTest :app:lintDebug
@@ -18,6 +18,8 @@ JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home ./gradl
 ```
 
 The debug APK is installable. A commercial release still needs an owner-controlled signing key, release configuration, and a broader physical-device test matrix. `assembleRelease` builds an unsigned optimized release.
+
+The current engineering results and limits are in [the foundation hardening report](EDITOR_ENGINE_FOUNDATION_FINAL_REPORT.md). Repeatable device/profile commands are in [the benchmark guide](tools/FOUNDATION_BENCHMARKS.md). Media3 is pinned to 1.12.0-alpha02; its packet-processing APIs are experimental.
 
 ## Editing workflow
 
@@ -61,10 +63,10 @@ Compose editor / WorkspaceViewModel
 - **Persistence:** versioned JSON, atomic writes, prior-good recovery, serialized IO, and explicit unsupported-schema rejection. Edit history is session-only.
 - **Text:** schema 2 stores native `TextContent` inside clips; schema 1 media projects migrate without retiming. Text never creates synthetic media files. `TextRasterizer` uses Android font shaping and a canonical 1080-high coordinate system, with a bounded bitmap cache shared by the editor and renderer. The Compose canvas adapter draws those bitmaps and derives timing/transforms directly from the project. Media3 `TimelineTextOverlay` consumes the same content for native preview and export. Text-only edits with unchanged project duration keep the editor's native video decoder running. Rasterization runs off the UI thread; active GPU overlays retain their bitmap across cache evictions.
 - **Render compiler:** the only translation of edits to media operations. Builds fresh stateful processors for each consumer. Visual and audio sequences derive from the same clips and timestamps; visual track gaps are transparent. A transparent primary image supplies output frame cadence. Audio-only sequences handle mixing and silence without mixed-track initialization races.
-- **Preview:** lifecycle releases decoders and GL resources, and activity recreation retains the playhead. Recompilation coalesces drag edits. The shared compiler can flatten non-overlapping visual clips with identity transforms and no enabled effects into a single visual sequence for preview. This path retains one player across cuts, images, gaps, speed changes, and paused seeks. Layered/transformed projects retain a safe decoder reset at visual boundaries to avoid stale frames in Media3 1.11.1's legacy compositor. Playback intent is separate from actual playback so Pause also works during buffering. Preview detail limits the longer edge to 640, 1280, or 1920 pixels without enlarging smaller canvases; this reduces render size, not source decode resolution.
+- **Preview:** a frame-paced latest-request mailbox retains one modern preview executor across ordinary transport, clip/gap boundaries and animated seeks. Transform/property updates use an atomic render binding; structural edits prepare a new composition on the retained player. Submitted-frame state means the final writer accepted the buffer/fence, not display scanout. Lifecycle release/resume and output-size changes have explicit ownership. A source-aware admission policy can lower output detail, create leased internal optimized visual media, or reject excessive inputs while retaining all required layers. Original audio and export sources remain authoritative. API 26/27 keeps a separate legacy compatibility path with weaker acknowledgement and boundary recovery.
 - **Export:** immutable job snapshot, device capability queries with supported defaults, requested bitrate/FPS/codec, AAC audio, foreground processing service, notification cancellation, progress, atomic completion publication, interrupted-job reporting and partial-output cleanup. Android 10+ uses `Movies/Frame`; Android 8–9 uses a system-selected document location.
 
-`RenderEffectRegistry` is the extension point for new Media3/GPU effects. Transitions and animated properties are modeled, but unsupported operations fail explicitly instead of disappearing from preview/export. Text tracks form a title/caption stack above video and overlay tracks; later text tracks render on top. Text-only and audio-only exports use a single canvas input without compositor-only settings.
+`RenderEffectRegistry` is the extension point for new Media3/GPU effects. Brightness, contrast and saturation render real pixels; source-timed media transform/opacity properties have runtime adapters. Transition execution and unsupported bindings fail explicitly instead of disappearing from preview/export. Text tracks form a title/caption stack above video and overlay tracks; later text tracks render on top. Text-only and audio-only exports use a single canvas input without compositor-only settings.
 
 ## Validation
 
@@ -90,15 +92,15 @@ Android unit tests cover PCM sample formats/timestamps and exact Media3 speed-du
 
 Tests use an emulator/device connected through ADB. They do not require access to personal media. Pixel tests capture the video SurfaceView and sample inside the composition's letterboxed region.
 
-See the [validation record and device screenshots](docs/validation/README.md) for the completed test counts and evidence limits.
+See the [current foundation report](EDITOR_ENGINE_FOUNDATION_FINAL_REPORT.md) for current test counts, measured before/after results and limits. The [earlier validation record](docs/validation/README.md) is historical.
 
 ## Current boundaries
 
-- Media3 CompositionPlayer is experimental. The single-input preview optimization is limited to non-overlapping, untransformed visual clips without enabled effects. Layered/transformed compositions can still briefly rebuffer at visual boundaries; seamless multitrack playback needs further backend work. Decode accuracy is constrained by source frames, the millisecond player seek API, and device codecs.
-- Lower preview detail reduces output texture work; proxy-media generation is not implemented, so heavy source videos can still exceed a device's decoding capacity.
-- 4K, HEVC, and high frame rates are offered based on encoder capability. They require separate physical-device verification; advertised capabilities cannot guarantee a device has sufficient memory for every layered project.
+- Media3 CompositionPlayer and the new packet API are experimental. Modern transport retains one executor, but native calls, codec item switches, buffering and GPU frame tails still cost time. API 26/27 compatibility and broad physical-device behavior need separate validation. Decode accuracy is constrained by source cadence, the millisecond seek API and codecs.
+- Output detail and original source decoding are accounted for separately. Internal optimized media is implemented, but cold preparation takes real time; layer/codec/resource limits can still reject preview explicitly. Cache budgets are not a hard bound on unknown driver memory.
+- Encoder capability is a reported possibility. Actual export dimensions/cadence are inspected, and observed size fallbacks persist by backend/device version. The tested emulator produced 1080p from a 2160 request. 4K HEVC/60 FPS and physical-device coverage remain distinct from the verified H.26430 optimized-preview workload.
 - HDR sources are tone-mapped to SDR. HDR output and color-managed mastering are not implemented.
-- Effects, transitions, keyframe editing, speed ramps, masks, chroma key, and LUT tools are future work. Unknown render features are rejected explicitly.
+- Transition execution, keyframe editing, speed ramps, masks, chroma key and LUT tools remain future work. Basic colour effects and source-timed transform evaluation are implemented; unsupported features are rejected explicitly.
 - Captions are manually entered/timed. Automatic transcription, SRT import/export, custom font import, word highlighting, and animated text presets are not implemented. The four font choices use Android system families; exact glyphs can differ across devices. Text is limited to 2000 characters and bounded raster dimensions; overly tall/large text reports an error. Captions are burned into MP4 frames rather than exported as a selectable subtitle track.
 - Interactive text preview follows the project playback clock (approximately 33 ms updates); export evaluates text at each output frame timestamp. Font smoothing, H.264 compression, and preview scaling can produce small edge differences. All text layers currently sit above visual layers; arbitrary text/video interleaving is not supported.
 - Clips cannot overlap within one track; use overlay tracks for simultaneous visuals. Tracks can be added, locked, and muted; arbitrary track-stack reordering and track deletion are future tools.

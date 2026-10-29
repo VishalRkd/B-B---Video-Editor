@@ -87,11 +87,23 @@ class CompositionIntegrationTest {
                 awaitColor(view!!, Color.WHITE, .75f, .25f)
                 onMain { engine.seek(1_400_000) }
                 awaitColor(view!!, Color.BLUE)
-                onMain { engine.seek(300_000); engine.play() }
-                await("clock crosses a clip boundary with audio") { engine.state.value.positionUs > 1_300_000 && engine.state.value.playing }
-                awaitColor(view!!, Color.BLUE)
-                assertNull(engine.state.value.error)
-                onMain { engine.pause() }
+                repeat(4) { pass ->
+                    onMain { engine.seek(300_000); engine.play() }
+                    try {
+                        await("clock crosses a clip boundary with audio (pass $pass)") { engine.state.value.positionUs > 1_300_000 && engine.state.value.playing }
+                    }catch(error:AssertionError) {
+                        throw AssertionError("${error.message}; state=${engine.state.value}; native=${onMain{engine.state.value.player?.let{it.currentPosition to it.playbackState}}}; events=${onMain{engine.diagnostics.events()}}; metrics=${onMain{engine.diagnostics.snapshot()}}",error)
+                    }
+                    awaitColor(view!!, Color.BLUE)
+                    assertNull(engine.state.value.error)
+                    onMain { engine.pause() }
+                    if(pass<3) {
+                        onMain{engine.seek(1_400_000)}
+                        await("paused later sample") { !engine.state.value.buffering && engine.state.value.submittedGeneration==engine.state.value.requestedGeneration }
+                        awaitColor(view!!,Color.BLUE)
+                    }
+                }
+                assertEquals(1L,onMain{engine.diagnostics.snapshot().playerCreates})
 
                 // Replace the shared project: reordered clips must change the preview immediately.
                 val reordered = ReorderClip(second.id, 0).apply(project)

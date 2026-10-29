@@ -195,6 +195,10 @@ class MediaImporter(context: Context) {
                 rotationDegrees = rotation, frameRate = frameRate.takeIf { it.isFinite() && it > 0 } ?: 0f,
                 hasAudio = audio != null, mimeType = mime.ifEmpty { (video ?: audio)?.getString(MediaFormat.KEY_MIME).orEmpty() },
                 sizeBytes = size,
+                codecMimeType = video?.getString(MediaFormat.KEY_MIME).orEmpty(),
+                colorTransfer = video?.intOrZero(MediaFormat.KEY_COLOR_TRANSFER) ?: 0,
+                audioChannels = audio?.intOrZero(MediaFormat.KEY_CHANNEL_COUNT) ?: 0,
+                audioSampleRate = audio?.intOrZero(MediaFormat.KEY_SAMPLE_RATE) ?: 0,
             )
         } finally {
             extractor.release()

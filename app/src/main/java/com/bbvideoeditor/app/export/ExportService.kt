@@ -51,9 +51,11 @@ class ExportService : Service() {
             stopSelf(); return START_NOT_STICKY
         }
         job = scope.launch {
+            var assetLease:AutoCloseable?=null
             var temporary: File? = null
             var terminal: ExportState? = null
             try {
+                assetLease=app.assets.acquire()
                 val request = app.exports.request(id)
                 val state = ExportState(id, request.project.id, request.project.name, ExportPhase.PREPARING, detail = "Preparing media…")
                 app.exports.update(state)
@@ -67,7 +69,7 @@ class ExportService : Service() {
                 app.exports.update(app.exports.state.value.copy(phase = ExportPhase.PUBLISHING, progress = 100, detail = "Saving video to your device…"))
                 val output = MediaPublisher(this@ExportService).publish(temporary, request.project.name, request.settings, File(app.exports.jobDirectory(id), "pending_uri.txt"))
                 terminal = app.exports.state.value.copy(phase = ExportPhase.SUCCEEDED, outputUri = output.toString(), outputBytes = result.bytes,
-                    detail = "${result.width} × ${result.height} · ${request.settings.frameRate} FPS · ${if (result.codec == VideoCodec.HEVC.mime) "HEVC" else "H.264"} · AAC")
+                    detail = "${result.width} × ${result.height} · ${result.actualFrameRate?.let{String.format(java.util.Locale.ROOT,"%.2f",it)} ?: "unverified"} FPS · ${if (result.codec == VideoCodec.HEVC.mime) "HEVC" else "H.264"} · AAC")
                 getSystemService(NotificationManager::class.java).notify(COMPLETION_NOTIFICATION, notification("Video saved: ${request.project.name}", null, completed = true))
             } catch (e: CancellationException) {
                 terminal = app.exports.state.value.copy(phase = if (timedOut) ExportPhase.FAILED else ExportPhase.CANCELLED, error = if (timedOut) "Android stopped this export after its background processing time limit." else null, detail = "Export cancelled.")
@@ -76,6 +78,7 @@ class ExportService : Service() {
             } finally {
                 withContext(NonCancellable) {
                     withContext(Dispatchers.IO) { temporary?.delete(); runCatching { File(app.exports.jobDirectory(id), "request.json").delete() } }
+                    assetLease?.close()
                     releaseWakeLock()
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     terminal?.let(app.exports::update)

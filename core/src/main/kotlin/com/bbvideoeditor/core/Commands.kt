@@ -124,11 +124,14 @@ data class DeleteClip(val clipId: String, val ripple: Boolean = false) : EditorC
         val withoutTransitions = project.copy(timeline = project.timeline.copy(transitions = project.timeline.transitions.filterNot {
             it.fromClipId == clipId || it.toClipId == clipId
         }))
-        return withoutTransitions.editTrack(track.id) {
+        val edited = withoutTransitions.editTrack(track.id) {
             it.copy(clips = it.clips.filterNot { existing -> existing.id == clipId }.map { existing ->
                 if (ripple && existing.startUs >= clip.endUs) existing.copy(startUs = existing.startUs - clip.durationUs) else existing
             })
         }
+        val mediaId=clip.mediaId
+        return if(mediaId!=null && edited.timeline.clips.none{it.mediaId==mediaId})
+            edited.copy(media=edited.media-mediaId) else edited
     }
 }
 
@@ -237,6 +240,9 @@ class EditorHistory(initial: Project, private val capacity: Int = 100) {
     private val future = ArrayDeque<Entry>()
     var project: Project = initial.validate()
         private set
+    /** Active document, undo and redo all retain source ownership until history is released. */
+    val referencedMedia: Set<String> get() = (sequenceOf(project) + past.asSequence().map { it.project } + future.asSequence().map { it.project })
+        .flatMap { it.media.values.asSequence() }.map { it.uri }.toSet()
     val canUndo: Boolean get() = past.isNotEmpty()
     val canRedo: Boolean get() = future.isNotEmpty()
     val undoLabel: String? get() = past.lastOrNull()?.label

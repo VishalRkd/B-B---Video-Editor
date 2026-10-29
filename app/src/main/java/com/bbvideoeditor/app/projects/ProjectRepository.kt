@@ -14,19 +14,32 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import com.bbvideoeditor.core.CURRENT_PROJECT_SCHEMA
 import java.io.File
 import java.io.IOException
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
 
+enum class ProjectReadFailure { CORRUPT_DOCUMENT, UNSUPPORTED_SCHEMA, MISSING_FILE, STORAGE_FAILURE }
+
+class ProjectReadException(val reason: ProjectReadFailure, message: String, cause: Throwable? = null) : IOException(message, cause)
+
+enum class ProjectRecoveryKind { PREVIOUS_VERSION, INTERRUPTED_WRITE }
+data class ProjectRecovery(val projectId: String, val kind: ProjectRecoveryKind)
+
 /** Disk operations are serialized, atomic, and never run on the UI thread. */
-class ProjectRepository(context: Context) {
-    private val directory = File(context.applicationContext.filesDir, "projects")
+class ProjectRepository(context: Context, private val directory:File = File(context.applicationContext.filesDir,"projects")) {
     private val preferences = context.applicationContext.getSharedPreferences("editor_projects", Context.MODE_PRIVATE)
     private val mutex = Mutex()
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
     private val _issues = MutableStateFlow<List<String>>(emptyList())
     val issues: StateFlow<List<String>> = _issues.asStateFlow()
+    private val _recoveries = MutableStateFlow<List<ProjectRecovery>>(emptyList())
+    val recoveries: StateFlow<List<ProjectRecovery>> = _recoveries.asStateFlow()
 
     suspend fun list(): List<Project> = withContext(Dispatchers.IO) {
         mutex.withLock {
@@ -69,14 +82,22 @@ class ProjectRepository(context: Context) {
         mutex.withLock {
             directory.mkdirs()
             val current = projectFile(project.id)
+            for(protected in listOf(File(current.path+".bak"),backupFile(project.id),File(backupFile(project.id).path+".bak"))) {
+                if(protected.exists())try{read(protected,project.id)}catch(error:ProjectReadException) {
+                    if(error.reason in setOf(ProjectReadFailure.UNSUPPORTED_SCHEMA,ProjectReadFailure.STORAGE_FAILURE))throw error
+                }
+            }
             val serialized = json.encodeToString(project).toByteArray(Charsets.UTF_8)
             require(serialized.size <= MAX_PROJECT_BYTES) { "The project file exceeds the supported size" }
             coroutineContext.ensureActive()
             // Preserve the previous known-good snapshot independently of AtomicFile's write recovery.
             if (current.exists()) {
-                runCatching { read(current, project.id) }.getOrNull()?.let { previous ->
-                    writeAtomic(backupFile(project.id), json.encodeToString(previous).toByteArray(Charsets.UTF_8))
+                val previous = try { read(current, project.id) } catch (error: ProjectReadException) {
+                    // A newer document must also be protected from a stale autosave, not just load.
+                    if (error.reason != ProjectReadFailure.CORRUPT_DOCUMENT) throw error
+                    null
                 }
+                previous?.let { writeAtomic(backupFile(project.id), json.encodeToString(it).toByteArray(Charsets.UTF_8)) }
             }
             writeAtomic(current, serialized)
         }
@@ -99,6 +120,23 @@ class ProjectRepository(context: Context) {
         }
     }
 
+    /** Read-only maintenance snapshot. A future/corrupt/unreadable document disables collection;
+     * maintenance must never recover or rewrite documents to decide which assets can be removed. */
+    suspend fun protectedMediaUris(): Set<String>? = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val references=mutableSetOf<String>()
+            val files=directory.listFiles() ?: if(directory.exists())return@withLock null else emptyArray()
+            for(file in files.filter {
+                it.name.endsWith(".json") || it.name.endsWith(".json.bak") || it.name.endsWith(".previous") || it.name.endsWith(".previous.bak")
+            }) {
+                val id=file.name.removeSuffix(".bak").removeSuffix(".json").removeSuffix(".previous")
+                val project=try{read(file,checkId(id))}catch(_:Exception){return@withLock null}
+                references+=project.media.values.map{it.uri}
+            }
+            references
+        }
+    }
+
     suspend fun lastProjectId(): String? = withContext(Dispatchers.IO) {
         preferences.getString(LAST_PROJECT, null)
     }
@@ -109,27 +147,48 @@ class ProjectRepository(context: Context) {
     }
 
     private fun readWithRecovery(id: String, problems: MutableList<String>): Project {
-        return try {
-            read(projectFile(id), id)
-        } catch (original: Exception) {
-            val recovered = try {
-                read(backupFile(id), id)
-            } catch (_: Exception) {
-                throw IOException("Project is unavailable or damaged", original)
+        val current = projectFile(id)
+        try { return read(current, id) } catch (original: ProjectReadException) {
+            if (original.reason !in setOf(ProjectReadFailure.CORRUPT_DOCUMENT, ProjectReadFailure.MISSING_FILE)) throw original
+            // Do not call AtomicFile.openRead before inspecting the current schema: its .bak
+            // promotion can itself overwrite a valid future-version current document.
+            val candidates = listOf(File(current.path + ".bak") to ProjectRecoveryKind.INTERRUPTED_WRITE,
+                backupFile(id) to ProjectRecoveryKind.PREVIOUS_VERSION)
+            for ((file, kind) in candidates) {
+                val recovered = try { read(file, id) } catch (error: ProjectReadException) {
+                    if (error.reason in setOf(ProjectReadFailure.UNSUPPORTED_SCHEMA, ProjectReadFailure.STORAGE_FAILURE)) throw error
+                    continue
+                }
+                writeAtomic(current, json.encodeToString(recovered).toByteArray(Charsets.UTF_8))
+                _recoveries.value = (_recoveries.value.filterNot { it.projectId == id } + ProjectRecovery(id, kind)).takeLast(100)
+                problems += "Recovered \"${recovered.name}\" from its previous saved version."
+                return recovered
             }
-            writeAtomic(projectFile(id), json.encodeToString(recovered).toByteArray(Charsets.UTF_8))
-            problems += "Recovered \"${recovered.name}\" from its previous saved version."
-            recovered
+            throw original
         }
     }
 
     private fun read(file: File, expectedId: String): Project {
-        val bytes = AtomicFile(file).openRead().use { input ->
-            require(input.channel.size() <= MAX_PROJECT_BYTES) { "Project file is too large" }
-            input.readBytes()
+        val bytes = try {
+            file.inputStream().use { input ->
+                if (input.channel.size() > MAX_PROJECT_BYTES) throw ProjectReadException(ProjectReadFailure.STORAGE_FAILURE, "Project file exceeds the supported size; it was left unchanged.")
+                input.readBytes()
+            }
+        } catch (error: ProjectReadException) { throw error }
+          catch (error: IOException) {
+            throw ProjectReadException(if (file.exists()) ProjectReadFailure.STORAGE_FAILURE else ProjectReadFailure.MISSING_FILE,
+                if (file.exists()) "Project storage is unavailable; the document was left unchanged." else "Project file is missing.", error)
         }
-        return json.decodeFromString<Project>(bytes.toString(Charsets.UTF_8)).upgradeSchema().also {
-            require(it.id == expectedId) { "Project identifier does not match its file" }
+        val element = try { json.parseToJsonElement(bytes.toString(Charsets.UTF_8)).jsonObject }
+            catch (error: IllegalArgumentException) { throw ProjectReadException(ProjectReadFailure.CORRUPT_DOCUMENT, "Project JSON is damaged.", error) }
+        val version = try { element["schemaVersion"]?.jsonPrimitive?.intOrNull ?: if ("schemaVersion" in element) -1 else CURRENT_PROJECT_SCHEMA }
+            catch (error: IllegalArgumentException) { throw ProjectReadException(ProjectReadFailure.CORRUPT_DOCUMENT, "Invalid schema field.", error) }
+        if (version > CURRENT_PROJECT_SCHEMA || version == 0) throw ProjectReadException(ProjectReadFailure.UNSUPPORTED_SCHEMA,
+            "This project uses schema $version; this app supports up to $CURRENT_PROJECT_SCHEMA. Open it with a compatible version. The document was left unchanged.")
+        return try {
+            json.decodeFromJsonElement<Project>(element).upgradeSchema().also { require(it.id == expectedId) { "Project identifier does not match its file" } }
+        } catch (error: IllegalArgumentException) {
+            throw ProjectReadException(ProjectReadFailure.CORRUPT_DOCUMENT, "Project data is invalid.", error)
         }
     }
 

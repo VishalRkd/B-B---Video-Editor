@@ -47,6 +47,7 @@ data class CompiledComposition(
     val frameRate: Int,
     val requiresCompositor: Boolean = true,
     val plan: RenderPlan,
+    val binding: RuntimeRenderBinding,
 )
 
 /**
@@ -70,9 +71,13 @@ class CompositionCompiler(
         frameRate: Int = project.canvas.frameRate,
         preferSingleVisualInput: Boolean = false,
         renderText: Boolean = true,
+        textPositionUs: Long = 0,
+        observeOutputRevision: Boolean = false,
+        previewSources: Map<String, MediaReference> = emptyMap(),
+        normalizeAudioDuration: Boolean = true,
     ): CompiledComposition = compile(
         withContext(Dispatchers.Default) { RenderPlan.derive(project) },
-        outputWidth, outputHeight, frameRate, preferSingleVisualInput, renderText,
+        outputWidth, outputHeight, frameRate, preferSingleVisualInput, renderText, textPositionUs, observeOutputRevision, previewSources, normalizeAudioDuration,
     )
 
     /** Reuse immutable indexes across boundary recovery; runtime effects remain independently owned. */
@@ -83,9 +88,16 @@ class CompositionCompiler(
         frameRate: Int = plan.project.canvas.frameRate,
         preferSingleVisualInput: Boolean = false,
         renderText: Boolean = true,
+        textPositionUs: Long = 0,
+        observeOutputRevision: Boolean = false,
+        previewSources: Map<String, MediaReference> = emptyMap(),
+        normalizeAudioDuration: Boolean = true,
     ): CompiledComposition = withContext(Dispatchers.Default) {
         val project = plan.project
         effects.preflight(project)
+        require(plan.audio.flatMap{it.track.clips}.mapNotNull{project.media[it.mediaId]}.none{it.audioChannels>6}) {
+            "Audio with more than six channels needs an explicit downmix; this source cannot be rendered safely."
+        }
         require(project.durationUs > 0) { "Add media or text before previewing or exporting." }
         require(outputWidth in 2..8192 && outputHeight in 2..8192 && outputWidth % 2 == 0 && outputHeight % 2 == 0)
         require(frameRate in 1..120)
@@ -104,10 +116,7 @@ class CompositionCompiler(
             }
         }
         val textTracks = plan.text.map { it.track }
-        for (track in textTracks) {
-            // Prewarm a small window off the render thread. Later captions are cached on demand.
-            if (renderText) track.clips.sortedBy { it.startUs }.take(2).forEach { textBitmaps.get(requireNotNull(it.text), project.canvas, outputHeight) }
-        }
+        if (renderText) prefetchText(plan, textPositionUs, outputHeight)
         val visualTracks = plan.visuals.map { it.track }
         val visualClips = plan.visualClips
         // With no simultaneous layers or compositor-only edits, all visual clips can share one
@@ -128,6 +137,10 @@ class CompositionCompiler(
         val sequences = mutableListOf<EditedMediaItemSequence>()
         if (!useSingleVisualInput || visualTracks.isEmpty()) sequences.add(clockSequence(ensureClockAsset(), project.durationUs, frameRate))
         val warnings = mutableListOf<String>()
+        val audioEvents=plan.audio.flatMap{track->track.track.clips.flatMap{listOf(it.startUs to it.volume,it.endUs to -it.volume)}}
+            .sortedWith(compareBy<kotlin.Pair<Long,Float>>{it.first}.thenBy{it.second})
+        var gain=0f
+        if(audioEvents.any{gain+=it.second;gain>1.001f} || plan.audio.any{track->track.track.clips.any{(project.media[it.mediaId]?.audioChannels ?: 0)>2}}) warnings += "Overlapping audio may exceed available headroom. User gains are preserved; the PCM mix saturates at full scale."
         for (track in sequenceTracks) {
             coroutineContext.ensureActive()
             val trackTypes = if (track.type == TrackType.AUDIO) setOf(C.TRACK_TYPE_AUDIO) else setOf(C.TRACK_TYPE_VIDEO)
@@ -136,8 +149,8 @@ class CompositionCompiler(
             for (clip in track.clips.sortedBy { it.startUs }) {
                 coroutineContext.ensureActive()
                 if (clip.startUs > cursorUs) sequence.addGap(clip.startUs - cursorUs)
-                val media = requireNotNull(project.media[clip.mediaId])
-                sequence.addItem(compileClip(clip, media, track, outputWidth, outputHeight, frameRate))
+                val media = requireNotNull(if(track.type==TrackType.AUDIO)project.media[clip.mediaId] else previewSources[clip.mediaId] ?: project.media[clip.mediaId])
+                sequence.addItem(compileClip(clip, media, track, outputWidth, outputHeight, frameRate, normalizeAudioDuration))
                 cursorUs = clip.endUs
             }
             if (cursorUs < project.durationUs) sequence.addGap(project.durationUs - cursorUs)
@@ -149,6 +162,7 @@ class CompositionCompiler(
         if (!useSingleVisualInput && visualTracks.size > 3) {
             warnings += "This project has ${visualTracks.size} visual tracks; playback depends on the device's decoder capacity."
         }
+        val binding = RuntimeRenderBinding(plan)
         val compositionBuilder = Composition.Builder(sequences)
             .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
         val compositionEffects = mutableListOf<androidx.media3.common.Effect>()
@@ -157,9 +171,8 @@ class CompositionCompiler(
             // Native video gaps decode as small black bitmaps. Apply the output canvas after
             // every item, including gaps, without requiring a second visual clock input.
             compositionEffects += Presentation.createForWidthAndHeight(outputWidth, outputHeight, Presentation.LAYOUT_SCALE_TO_FIT)
-        } else {
-            compositionBuilder.setVideoCompositorSettings(ProjectCompositor(plan.visuals, outputWidth, outputHeight))
         }
+        if (requiresCompositor || observeOutputRevision) compositionBuilder.setVideoCompositorSettings(ProjectCompositor(binding, outputWidth, outputHeight, requiresCompositor))
         // Text tracks form the title/caption stack above the visual composition. Chunking avoids
         // exceeding texture-unit limits on older GPUs while retaining the track stacking order.
         textTracks.filter { renderText }.map { TimelineTextOverlay(it, project.canvas, outputHeight, textBitmaps) }.chunked(8)
@@ -167,8 +180,24 @@ class CompositionCompiler(
         compositionBuilder.setEffects(Effects(emptyList(), compositionEffects))
         CompiledComposition(
             compositionBuilder.build(), project.durationUs, warnings, outputWidth, outputHeight, frameRate,
-            requiresCompositor = requiresCompositor, plan = plan,
+            requiresCompositor = requiresCompositor, plan = plan, binding = binding,
         )
+    }
+
+    suspend fun validate(plan:RenderPlan)=withContext(Dispatchers.Default){effects.preflight(plan.project)}
+
+    /** Current active glyphs are prepared before seek admission; adjacent captions get bounded
+     * lookahead. No sorting or source/media scan occurs at output-frame frequency. */
+    suspend fun prefetchText(plan:RenderPlan,positionUs:Long,outputHeight:Int)=withContext(Dispatchers.Default) {
+        for(track in plan.text) {
+            val active=track.clipAt(positionUs)
+            val next=track.clipsInRange(positionUs,(positionUs+2_000_000).coerceAtLeast(positionUs)).take(2)
+            val recent=track.clipsInRange((positionUs-500_000).coerceAtLeast(0),positionUs).takeLast(1)
+            for(clip in (recent+next+listOfNotNull(active)).distinctBy{it.id}) {
+                coroutineContext.ensureActive()
+                textBitmaps.get(requireNotNull(clip.text),plan.project.canvas,outputHeight)
+            }
+        }
     }
 
     private fun compileClip(
@@ -178,6 +207,7 @@ class CompositionCompiler(
         width: Int,
         height: Int,
         frameRate: Int,
+        normalizeAudioDuration: Boolean,
     ): EditedMediaItem {
         val item = MediaItem.Builder()
             .setUri(media.uri)
@@ -203,6 +233,10 @@ class CompositionCompiler(
                     putChannelMixingMatrix(ChannelMixingMatrix.createForConstantPower(channels, 2).scaleBy(clip.volume))
                 }
             }
+            // Transformer concatenates decoded PCM; constrain each complete item to its declared
+            // duration. CompositionPlayer instead uses absolute stream timestamps and may end a
+            // partial stream during a seek. Padding that partial stream can stall its audio clock.
+            if(normalizeAudioDuration)audioEffects += ClipDurationAudioProcessor(clip.durationUs)
         }
         val videoEffects = mutableListOf<androidx.media3.common.Effect>()
         if (track.type != TrackType.AUDIO) {
@@ -259,14 +293,15 @@ class CompositionCompiler(
 
 /** Input 0 is the clock; visual inputs 1..n are registered from topmost layer to bottommost. */
 @UnstableApi
-private class ProjectCompositor(private val tracks: List<RenderTrack>, private val width: Int, private val height: Int) : VideoCompositorSettings {
+private class ProjectCompositor(override val binding: RuntimeRenderBinding, private val width: Int, private val height: Int, private val clockPrimary: Boolean) : VideoCompositorSettings, FrameGraphIdentity {
     private val hidden = object : OverlaySettings { override fun getAlphaScale(): Float = 0f }
 
     override fun getOutputSize(inputSizes: MutableList<Size>): Size = Size(width, height)
 
     override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
+        if (!clockPrimary) return VideoCompositorSettings.DEFAULT.getOverlaySettings(inputId, presentationTimeUs)
         if (inputId == 0) return hidden
-        val state = tracks.getOrNull(inputId - 1)?.stateAt(presentationTimeUs) ?: return hidden
+        val state = binding.evaluateFrame(presentationTimeUs).visuals.firstOrNull{it.stackOrder==inputId-1} ?: return hidden
         val transform = state.transform
         return object : OverlaySettings {
             override fun getAlphaScale(): Float = transform.opacity

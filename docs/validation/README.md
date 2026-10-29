@@ -1,6 +1,8 @@
-# Validation record
+# Historical validation record
 
-Validated on 27 October 2026 using JDK 17, Android SDK 36, and an ARM64 Pixel 5 emulator running Android 17 / API 37. Screenshots show text entered into a project created only on the emulator; no sample project or fabricated preview ships in the APK.
+This records the 27 October foundation state. Feature boundaries and test counts below describe that historical version. For current implementation and verification, see [the foundation hardening report](../../EDITOR_ENGINE_FOUNDATION_FINAL_REPORT.md).
+
+Validated on 27 October 2026 using JDK 17, Android SDK 36, and an ARM64 Pixel 5 emulator running Android 17 / API 37. That session used a project created only on the emulator; no personal media was required.
 
 | Check | Result |
 | --- | --- |
@@ -19,7 +21,7 @@ Continuity tests play generated sequences through trimmed videos, gaps, 2x and 0
 
 Text tests verify under-finger model updates before release, one-step undo, pinch/rotation, locked tracks, left-trim extension, manual caption timing/style, and durable save/reopen. Export tests compare styled, rotated, partially transparent text layers and caption gaps against the actual Compose canvas. Font rasterization and H.264 chroma subsampling receive an explicit two-pixel edge tolerance, while bulk geometry and pixel-color differences are checked separately. Portrait captions are also verified over decoded video with audio, including output orientation and start/end timing.
 
-The installed app was also checked manually: create a project, enter/style a title, save it to the timeline, move it on the native preview, undo the move, and play to the end. The preview retained the final text frame at the project end. The screenshots below come from that app session.
+The installed app was also checked manually: create a project, enter/style a title, save it to the timeline, move it on the native preview, undo the move, and play to the end. The preview retained the final text frame at the project end.
 
 ## Reproduce
 
@@ -33,11 +35,6 @@ Generated reports live in `core/build/reports/tests`, `app/build/reports/tests`,
 ```sh
 adb shell am instrument -w -r com.bbvideoeditor.app.test/androidx.test.runner.AndroidJUnitRunner
 ```
-
-## Screens
-
-- [Text layer on the editor canvas and timeline](text-editor.png)
-- [Text style and timing controls](text-style.png)
 
 ## Evidence limits
 

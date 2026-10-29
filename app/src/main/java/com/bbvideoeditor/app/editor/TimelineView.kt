@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,11 +86,20 @@ private data class PointerEdit(
     val trackId: String,
     val down: Offset,
     val initialCenterUs: Long,
+    val snapIndex: SnapIndex,
 )
 private class TimelineMotion {
     var fling: Job? = null
     var snapTargetUs by mutableStateOf<Long?>(null)
     var draggingClipId by mutableStateOf<String?>(null)
+}
+
+@Composable
+fun TimelineView(editor: EditorViewModel, thumbnails: ThumbnailProvider?, modifier: Modifier = Modifier,
+    waveforms: WaveformRepository? = null) {
+    val document by editor.document.collectAsStateWithLifecycle()
+    val transport by editor.transport.collectAsStateWithLifecycle()
+    TimelineView(document.withTransport(transport), editor, thumbnails, modifier, waveforms)
 }
 
 /**
@@ -120,7 +130,8 @@ fun TimelineView(
     val currentScale by rememberUpdatedState(pixelsPerSecond)
     val currentContentWidth by rememberUpdatedState(contentWidthPx)
     val viewport = TimelineViewport(state.positionUs, pixelsPerSecond)
-    val indexes = remember(state.project.timeline.tracks) { state.project.timeline.tracks.associate { it.id to TrackIndex(it) } }
+    val derived = remember { TimelineDerivedIndexes() }
+    val indexes = remember(state.project.timeline.tracks) { derived.update(state.project.timeline.tracks) }
     val currentIndexes by rememberUpdatedState(indexes)
 
     LaunchedEffect(state.selectedClipId) {
@@ -182,7 +193,7 @@ fun TimelineView(
                         if (track.locked) return
                         editor.select(clip.id)
                         editor.beginGesture()
-                        edit = PointerEdit(kind, initialProject, clip, track.id, down.position, initialViewport.centerUs)
+                        edit = PointerEdit(kind, initialProject, clip, track.id, down.position, initialViewport.centerUs, SnapIndex(initialProject, clip.id))
                         motion.draggingClipId = clip.id
                         if (kind == EditKind.MOVE) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     }
@@ -192,7 +203,7 @@ fun TimelineView(
                         val active = edit ?: return
                         val deltaUs = ((position.x - active.down.x) / currentScale * MICROS_PER_SECOND + centerUs - active.initialCenterUs).roundToLong()
                         val toleranceUs = (snapPx / currentScale * MICROS_PER_SECOND).roundToLong()
-                        val targets = TimelineSnapper.targets(active.project, active.clip.id, centerUs)
+                        val targets = active.snapIndex
                         val result = when (active.kind) {
                             EditKind.MOVE -> {
                                 val target = trackAt(rows, editor.state.value.project, position.y - rulerPx)
@@ -200,7 +211,7 @@ fun TimelineView(
                                     ?: return
                                 if (target.locked || !target.type.accepts(active.clip, active.project.media)) return
                                 val raw = (active.clip.startUs + deltaUs).coerceAtLeast(0)
-                                val snap = TimelineSnapper.snapMove(raw, active.clip.durationUs, targets, toleranceUs)
+                                val snap = targets.snapMove(raw, active.clip.durationUs, toleranceUs, centerUs)
                                 val otherClips = active.project.findTrack(target.id)?.clips.orEmpty().filterNot { it.id == active.clip.id }
                                 val collision = otherClips.any { snap.timeUs < it.endUs && snap.timeUs + active.clip.durationUs > it.startUs }
                                 val command: EditorCommand = if (collision && target.id == active.trackId && target.type == TrackType.VIDEO) {
@@ -210,7 +221,7 @@ fun TimelineView(
                                 } else MoveClip(active.clip.id, target.id, snap.timeUs)
                                 command to snap.targetUs
                             }
-                            EditKind.TRIM_START, EditKind.TRIM_END -> trimCommand(active, deltaUs, targets, toleranceUs)
+                            EditKind.TRIM_START, EditKind.TRIM_END -> trimCommand(active, deltaUs, targets, toleranceUs, centerUs)
                         }
                         editor.previewGesture(result.first)
                         motion.snapTargetUs = result.second
@@ -351,14 +362,14 @@ private fun trackAt(rows: LazyListState, project: Project, y: Float): Track? {
     return project.timeline.tracks.getOrNull(row.index)
 }
 
-private fun trimCommand(active: PointerEdit, deltaUs: Long, targets: List<Long>, toleranceUs: Long): Pair<EditorCommand, Long?> {
+private fun trimCommand(active: PointerEdit, deltaUs: Long, targets: SnapIndex, toleranceUs: Long, playheadUs: Long): Pair<EditorCommand, Long?> {
     val clip = active.clip
     val track = active.project.findTrack(active.trackId)!!
     val previousEnd = track.clips.filter { it.id != clip.id && it.endUs <= clip.startUs }.maxOfOrNull { it.endUs } ?: 0L
     val nextStart = track.clips.filter { it.id != clip.id && it.startUs >= clip.endUs }.minOfOrNull { it.startUs }
     val minimum = min(clip.sourceRange.durationUs, max(1L, ceil(MICROS_PER_SECOND.toDouble() / active.project.canvas.frameRate * clip.speed).toLong()))
     return if (active.kind == EditKind.TRIM_START) {
-        val desired = TimelineSnapper.snap((clip.startUs + deltaUs).coerceAtLeast(0), targets, toleranceUs)
+        val desired = targets.snap((clip.startUs + deltaUs).coerceAtLeast(0), toleranceUs, playheadUs)
         if (clip.text != null) {
             // Native text has no source-file boundary: its left edge can extend into empty time.
             val start = desired.timeUs.coerceIn(previousEnd, clip.endUs - minimum)
@@ -373,7 +384,7 @@ private fun trimCommand(active: PointerEdit, deltaUs: Long, targets: List<Long>,
         val newStart = clip.endUs - (range.durationUs / clip.speed.toDouble()).toLong()
         TrimClip(clip.id, range, newStart.coerceAtLeast(previousEnd)) to desired.targetUs?.takeIf { abs(it - newStart) <= 12 }
     } else {
-        val desired = TimelineSnapper.snap((clip.endUs + deltaUs).coerceAtLeast(clip.startUs), targets, toleranceUs)
+        val desired = targets.snap((clip.endUs + deltaUs).coerceAtLeast(clip.startUs), toleranceUs, playheadUs)
         val source = active.project.media[clip.mediaId]
         val mediaEnd = if (clip.text != null || source?.kind == MediaKind.IMAGE) Long.MAX_VALUE / 4 else requireNotNull(source).durationUs
         val trackLimit = nextStart?.let { clip.sourceRange.startUs + ((it - clip.startUs) * clip.speed.toDouble())
@@ -444,6 +455,10 @@ private fun TimelineTrack(
                 val visibleEnd = endX.coerceAtMost(widthPx + 20.0)
                 val visibleWidth = (visibleEnd - visibleX).coerceAtLeast(2.0)
                 val media = project.media[clip.mediaId]
+                val moving=draggingId==clip.id
+                val description=remember(clip.text?.text,media?.displayName,clip.id,clip.durationUs,moving) {
+                    "Clip ${clip.text?.text ?: media?.displayName ?: clip.id}, ${formatTime(clip.durationUs,true)}${if(moving)", moving" else ""}"
+                }
                 Box(Modifier.offset { IntOffset(visibleX.roundToInt(), with(density) { 7.dp.roundToPx() }) }
                     .width(with(density) { visibleWidth.toFloat().toDp() }).height(60.dp)
                     .graphicsLayer(alpha = if (track.muted) .55f else 1f)
@@ -451,13 +466,13 @@ private fun TimelineTrack(
                     .border(if (selectedId == clip.id) 2.dp else .5.dp,
                         if (selectedId == clip.id) Accent else Color.White.copy(alpha = .12f), RoundedCornerShape(7.dp))
                     .semantics {
-                        contentDescription = "Clip ${clip.text?.text ?: media?.displayName ?: clip.id}, ${formatTime(clip.durationUs, true)}${if (draggingId == clip.id) ", moving" else ""}"
+                        contentDescription = description
                         onClick("Select clip") { editor.select(clip.id); true }
                     }) {
                     if (media != null && media.kind != MediaKind.AUDIO && track.type != TrackType.AUDIO && thumbnails != null)
                         ThumbnailStrip(media, clip, x, visibleX, visibleWidth, viewport.pixelsPerSecond, thumbnails)
                     if (media != null && (track.type == TrackType.AUDIO || media.kind == MediaKind.AUDIO) && waveforms != null)
-                        WaveformStrip(media, clip, x, visibleX, viewport.pixelsPerSecond, waveforms, Modifier.fillMaxWidth().height(30.dp).align(Alignment.BottomCenter))
+                        WaveformStrip(media, clip, x, visibleX, visibleWidth, viewport.pixelsPerSecond, waveforms, Modifier.fillMaxWidth().height(30.dp).align(Alignment.BottomCenter))
                     Text(clip.text?.text ?: media?.displayName ?: "Missing media", Modifier.fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(horizontal = 10.dp, vertical = 3.dp), color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (selectedId == clip.id && !track.locked) {
                         if (x >= -1) TrimHandle(true, Modifier.align(Alignment.CenterStart))
@@ -478,11 +493,23 @@ private fun TrimHandle(left: Boolean, modifier: Modifier) {
 }
 
 @Composable
-private fun WaveformStrip(media: MediaReference, clip: Clip, originalX: Double, visibleX: Double, pixelsPerSecond: Double,
+private fun WaveformStrip(media: MediaReference, clip: Clip, originalX: Double, visibleX: Double, visibleWidth: Double, pixelsPerSecond: Double,
     repository: WaveformRepository, modifier: Modifier) {
-    val samples by produceState(FloatArray(0), media.uri, media.durationUs) {
-        value = repository.waveform(media, 2048)
+    val firstSource=(clip.sourceRange.startUs+(visibleX-originalX)/pixelsPerSecond*MICROS_PER_SECOND*clip.speed)
+        .toLong().coerceIn(0,(media.durationUs-1).coerceAtLeast(0))
+    val lastSource=(firstSource+visibleWidth/pixelsPerSecond*MICROS_PER_SECOND*clip.speed).toLong()
+        .coerceIn(firstSource+1,media.durationUs.coerceAtLeast(firstSource+1))
+    val span=(lastSource-firstSource).coerceAtLeast(1)
+    val quantum=when { span<500_000 -> 100_000L; span<2_000_000 -> 500_000L
+        span<10_000_000 -> 2_000_000L; else -> 5_000_000L }
+    val windowStart=firstSource/quantum*quantum
+    val windowEnd=minOf(media.durationUs,((lastSource+quantum-1)/quantum)*quantum).coerceAtLeast(windowStart+1)
+    val desiredBuckets=(visibleWidth/2*(windowEnd-windowStart)/span).toInt().coerceIn(64,4096)
+    val buckets=listOf(64,128,256,512,1024,2048,4096).first{it>=desiredBuckets}
+    val slice by produceState<com.bbvideoeditor.app.media.WaveformSlice?>(null,media.uri,windowStart,windowEnd,buckets) {
+        repository.progressiveWindow(media,windowStart,windowEnd,buckets).collect { value=it }
     }
+    val samples=slice?.peaks ?: FloatArray(0)
     Canvas(modifier) {
         if (samples.isEmpty() || media.durationUs <= 0) return@Canvas
         val step = 3.dp.toPx()
@@ -490,7 +517,9 @@ private fun WaveformStrip(media: MediaReference, clip: Clip, originalX: Double, 
         while (x < size.width) {
             val localUs = (visibleX + x - originalX) / pixelsPerSecond * MICROS_PER_SECOND
             val sourceUs = clip.sourceRange.startUs + localUs * clip.speed
-            val bucket = (sourceUs / media.durationUs * samples.size).toInt().coerceIn(samples.indices)
+            val current=slice ?: return@Canvas
+            if(sourceUs<current.startUs || sourceUs>=current.decodedThroughUs){x+=step;continue}
+            val bucket = ((sourceUs-current.startUs)/(current.endUs-current.startUs)*samples.size).toInt().coerceIn(samples.indices)
             val height = samples[bucket].coerceIn(0f, 1f) * size.height * .45f
             drawLine(Color.White.copy(alpha = .72f), Offset(x, size.height / 2 - height), Offset(x, size.height / 2 + height), 1.5.dp.toPx())
             x += step
@@ -508,9 +537,12 @@ private fun ThumbnailStrip(media: MediaReference, clip: Clip, originalX: Double,
         repeat(count.coerceAtMost(32)) { offset ->
             val tile = first + offset
             val sourceUs = (clip.sourceRange.startUs + tile * tilePx / pixelsPerSecond * MICROS_PER_SECOND * clip.speed).roundToLong().coerceIn(clip.sourceRange.startUs, clip.sourceRange.endUs - 1)
-            key(media.id, tile, sourceUs / 100_000) {
-                val bitmap by produceState<android.graphics.Bitmap?>(null, media.uri, sourceUs / 100_000, tilePx) {
-                    value = provider.thumbnail(media, sourceUs, tilePx, tilePx)
+            key(media.id, tile, sourceUs / 250_000) {
+                val bitmap by produceState<android.graphics.Bitmap?>(null, media.uri, sourceUs / 250_000, tilePx) {
+                    val tileStart=originalX+tile*tilePx
+                    val priority=if(tileStart+tilePx>visibleX && tileStart<visibleX+visibleWidth)
+                        com.bbvideoeditor.app.media.AssetPriority.VISIBLE else com.bbvideoeditor.app.media.AssetPriority.NEAR_VIEWPORT
+                    value = provider.thumbnail(com.bbvideoeditor.app.media.ThumbnailRequest(media,sourceUs,tilePx,tilePx,priority))
                 }
                 bitmap?.let { b ->
                     Image(b.asImageBitmap(), null,
@@ -519,5 +551,15 @@ private fun ThumbnailStrip(media: MediaReference, clip: Clip, originalX: Double,
                 }
             }
         }
+    }
+}
+
+/** Local to a timeline session, bounded to the current tracks; clip lists are the semantic key. */
+private class TimelineDerivedIndexes {
+    private var previous = emptyMap<String,Pair<List<Clip>,TrackIndex>>()
+    fun update(tracks:List<Track>):Map<String,TrackIndex> {
+        previous=tracks.associate { track -> track.id to (previous[track.id]?.takeIf { it.first==track.clips }
+            ?: (track.clips to TrackIndex(track))) }
+        return previous.mapValues { it.value.second }
     }
 }

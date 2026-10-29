@@ -137,7 +137,7 @@ class EffectRenderingTest {
                             near(lastColor, colors[index], 28) && !engine.state.value.buffering
                         }
                     } catch (error: AssertionError) {
-                        throw AssertionError("${error.message}; actual=${Integer.toHexString(lastColor)}, expected=${Integer.toHexString(colors[index])}; all exported=$colors", error)
+                        throw AssertionError("${error.message}; actual=${Integer.toHexString(lastColor)}, expected=${Integer.toHexString(colors[index])}; all exported=$colors; state=${engine.state.value}; events=${main { engine.diagnostics.events() }}", error)
                     }
                     assertNear(colors[index], lastColor, 28)
                 }

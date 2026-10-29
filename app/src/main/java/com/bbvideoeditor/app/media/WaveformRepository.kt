@@ -9,11 +9,18 @@ import android.net.Uri
 import android.os.SystemClock
 import android.util.AtomicFile
 import android.util.LruCache
+import com.bbvideoeditor.app.playback.EngineResourceBudget
 import com.bbvideoeditor.core.MediaKind
 import com.bbvideoeditor.core.MediaReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -32,7 +39,12 @@ import kotlin.math.abs
 class WaveformRepository(context: Context) {
     private val context = context.applicationContext
     private val directory = File(this.context.cacheDir, "audio_waveforms_v1")
-    private val memory = LruCache<String, FloatArray>(64)
+    private val memory = object:LruCache<String, FloatArray>(EngineResourceBudget.inspect(this.context).waveformBytes) {
+        override fun sizeOf(key:String,value:FloatArray)=value.size*4
+    }
+    private val queue=PriorityWorkQueue<FloatArray>(1,32)
+    val memoryBytes get()=memory.size()
+    fun queueMetrics()=queue.metrics()
     private val decoderSlot = Semaphore(1)
     private val locks = Array(16) { Mutex() }
 
@@ -40,9 +52,9 @@ class WaveformRepository(context: Context) {
     suspend fun waveform(media: MediaReference, buckets: Int = 160): FloatArray {
         require(buckets in 8..4096) { "Waveform size must be between 8 and 4096" }
         if (media.kind == MediaKind.IMAGE || !media.hasAudio || media.durationUs <= 0) return floatArrayOf()
-        val key = cacheKey("${media.uri}|${media.sizeBytes}|${media.durationUs}|$buckets")
-        memory.get(key)?.let { return it.copyOf() }
         return withContext(Dispatchers.IO) {
+            val key = cacheKey("${media.uri}|${media.sizeBytes}|${media.durationUs}|$buckets")
+            memory.get(key)?.let { return@withContext it.copyOf() }
             locks[(key.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
                 memory.get(key)?.let { return@withLock it.copyOf() }
                 try {
@@ -53,7 +65,25 @@ class WaveformRepository(context: Context) {
                         memory.put(key, it)
                         return@withLock it.copyOf()
                     }
-                    val envelope = decoderSlot.withPermit { decode(media, buckets) }
+                    val envelope = if(media.durationUs<=5_000_000) {
+                        queue.submit(key,AssetPriority.BACKGROUND){decoderSlot.withPermit { decode(media,buckets) }} ?: floatArrayOf()
+                    } else {
+                        val combined=FloatArray(buckets)
+                        var start=0L
+                        while(start<media.durationUs) {
+                            coroutineContext.ensureActive()
+                            val end=minOf(start+5_000_000,media.durationUs)
+                            val count=(buckets.toDouble()*(end-start)/media.durationUs).toInt().coerceIn(64,4096)
+                            val part=queue.submit("$key:$start",AssetPriority.BACKGROUND){decoderSlot.withPermit { decode(media,count,start,end) }}
+                                ?: floatArrayOf()
+                            part.forEachIndexed { i,peak ->
+                                val index=((start+(end-start)*(i+.5)/part.size)/media.durationUs*buckets).toInt().coerceIn(combined.indices)
+                                combined[index]=maxOf(combined[index],peak)
+                            }
+                            start=end
+                        }
+                        combined
+                    }
                     coroutineContext.ensureActive()
                     if (envelope.isNotEmpty()) {
                         memory.put(key, envelope)
@@ -71,7 +101,48 @@ class WaveformRepository(context: Context) {
 
     fun clearMemory() = memory.evictAll()
 
-    private suspend fun decode(media: MediaReference, buckets: Int): FloatArray {
+    /** Persistent visible-range analysis. Emits partial coarse data during decoding, then exact
+     * detail for this window; cancellation cannot create extra native decoder workers. */
+    fun progressiveWindow(media:MediaReference,startUs:Long,endUs:Long,buckets:Int=512):Flow<WaveformSlice> = channelFlow {
+        require(buckets in 8..4096 && startUs>=0 && endUs>startUs)
+        if(!media.hasAudio || media.durationUs<=0)return@channelFlow
+        val end=minOf(endUs,media.durationUs)
+        if(end<=startUs)return@channelFlow
+        val key=withContext(Dispatchers.IO){cacheKey("window2|${media.uri}|${media.sizeBytes}|${media.durationUs}|$startUs|$end|$buckets")}
+        val cached=withContext(Dispatchers.IO){memory.get(key) ?: readCache(File(directory,"$key.wave"),buckets)}
+        if(cached!=null){send(WaveformSlice(startUs,end,cached.copyOf(),end,true));return@channelFlow}
+        val combined=FloatArray(buckets)
+        var cursor=startUs
+        while(cursor<end) {
+            coroutineContext.ensureActive()
+            val from=cursor;val through=minOf(from+5_000_000,end)
+            val count=(buckets.toDouble()*(through-from)/(end-startUs)).toInt().coerceIn(64,4096)
+            fun merge(part:FloatArray) {
+                part.forEachIndexed { index,peak ->
+                    val time=from+(through-from)*(index+.5)/part.size
+                    val bucket=((time-startUs)/(end-startUs)*buckets).toInt().coerceIn(combined.indices)
+                    combined[bucket]=maxOf(combined[bucket],peak)
+                }
+            }
+            val part=queue.submit("$key:$from",AssetPriority.VISIBLE) {
+                decoderSlot.withPermit { decode(media,count,from,through) { partial,decoded ->
+                    merge(partial)
+                    trySend(WaveformSlice(startUs,end,combined.copyOf(),decoded,false))
+                } }
+            } ?: return@channelFlow
+            merge(part)
+            cursor=through
+            send(WaveformSlice(startUs,end,combined.copyOf(),through,through==end))
+        }
+        withContext(Dispatchers.IO) {
+            memory.put(key,combined)
+            directory.mkdirs()
+            runCatching{writeCache(File(directory,"$key.wave"),combined);trimDisk()}
+        }
+    }.buffer(1,BufferOverflow.DROP_OLDEST)
+
+    private suspend fun decode(media: MediaReference, buckets: Int, startUs:Long=0,
+        endUs:Long=media.durationUs, onPartial:((FloatArray,Long)->Unit)?=null): FloatArray {
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
         var started = false
@@ -81,6 +152,7 @@ class WaveformRepository(context: Context) {
                 extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
             } ?: return floatArrayOf()
             extractor.selectTrack(trackIndex)
+            if(startUs>0)extractor.seekTo(startUs,MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: return floatArrayOf()
             decoder = MediaCodec.createDecoderByType(mime)
@@ -96,6 +168,7 @@ class WaveformRepository(context: Context) {
             var outputEnded = false
             var decodedFrames = 0L
             var lastProgressMs = SystemClock.elapsedRealtime()
+            var lastPartialMs=lastProgressMs
             while (!outputEnded) {
                 coroutineContext.ensureActive()
                 if (!inputEnded) {
@@ -104,7 +177,7 @@ class WaveformRepository(context: Context) {
                         val input = requireNotNull(decoder.getInputBuffer(inputIndex))
                         input.clear()
                         val size = extractor.readSampleData(input, 0)
-                        if (size < 0) {
+                        if (size < 0 || extractor.sampleTime>=endUs) {
                             decoder.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputEnded = true
                         } else {
@@ -130,7 +203,12 @@ class WaveformRepository(context: Context) {
                                 output.position(info.offset)
                                 output.limit(info.offset + info.size)
                                 val pcm = output.slice().order(ByteOrder.LITTLE_ENDIAN)
-                                decodedFrames += consumePcm(pcm, pcmEncoding, channels, sampleRate, info.presentationTimeUs, media.durationUs, peaks)
+                                decodedFrames += consumePcm(pcm, pcmEncoding, channels, sampleRate, info.presentationTimeUs-startUs, endUs-startUs, peaks)
+                                val now=SystemClock.elapsedRealtime()
+                                if(onPartial!=null && now-lastPartialMs>=100) {
+                                    lastPartialMs=now
+                                    onPartial(peaks.copyOf(),info.presentationTimeUs.coerceIn(startUs,endUs))
+                                }
                             }
                             outputEnded = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         } finally {
@@ -230,3 +308,5 @@ fun consumePcm(
     }
     return frame
 }
+
+data class WaveformSlice(val startUs:Long,val endUs:Long,val peaks:FloatArray,val decodedThroughUs:Long,val complete:Boolean)

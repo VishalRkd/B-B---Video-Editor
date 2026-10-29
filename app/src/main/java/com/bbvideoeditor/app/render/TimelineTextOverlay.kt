@@ -20,6 +20,7 @@ class TimelineTextOverlay(
     private val bitmaps: TextBitmapCache,
 ) : BitmapOverlay() {
     private val index = TrackIndex(track)
+    private val ordered = track.clips.sortedBy { it.startUs }
     private val empty = createBitmap(1, 1)
     private var activeContent: TextContent? = null
     private var activeFrame: RasterizedText? = null
@@ -27,7 +28,9 @@ class TimelineTextOverlay(
     private fun frameAt(presentationTimeUs: Long): RasterizedText? {
         val content = index.clipAt(presentationTimeUs)?.text
         if (content != activeContent) {
-            activeFrame = content?.let { bitmaps.get(it, canvas, outputHeight) }
+            activeFrame = content?.let { bitmaps.getForRender(it, canvas, outputHeight) }
+            val next=ordered.binarySearch { it.startUs.compareTo(presentationTimeUs) }.let { if(it>=0)it+1 else -it-1 }
+            ordered.getOrNull(next)?.text?.let{bitmaps.prefetch(it,canvas,outputHeight)}
             activeContent = content
         }
         return activeFrame

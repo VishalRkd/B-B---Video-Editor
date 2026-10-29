@@ -14,11 +14,13 @@ import android.os.SystemClock
 import android.util.AtomicFile
 import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
+import com.bbvideoeditor.app.playback.EngineResourceBudget
 import com.bbvideoeditor.core.MediaKind
 import com.bbvideoeditor.core.MediaReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -26,7 +28,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
-import kotlin.coroutines.coroutineContext
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -34,26 +35,33 @@ import kotlin.math.roundToInt
 class ThumbnailCache(context: Context) : ThumbnailProvider {
     private val context = context.applicationContext
     private val directory = File(this.context.cacheDir, "timeline_thumbnails_v1")
-    private val decodeSlots = Semaphore(if (Build.VERSION.SDK_INT >= 27) 2 else 1)
+    private val budget=EngineResourceBudget.inspect(this.context)
+    private val queue=PriorityWorkQueue<Bitmap>(budget.thumbnailWorkers)
+    private val decodeSlots = Semaphore(budget.thumbnailWorkers)
     private val locks = Array(16) { Mutex() }
     private val diskMutex = Mutex()
     private var lastDiskSweepMs = 0L
     private val memory = object : LruCache<String, Bitmap>(
-        (Runtime.getRuntime().maxMemory() / 16L).coerceIn(4L * 1024 * 1024, 32L * 1024 * 1024).toInt(),
+        budget.thumbnailBytes,
     ) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
     }
 
-    override suspend fun thumbnail(media: MediaReference, sourceUs: Long, width: Int, height: Int): Bitmap? {
-        if (media.kind == MediaKind.AUDIO) return null
+    val memoryBytes get()=memory.size()
+    fun queueMetrics()=queue.metrics()
+    override suspend fun thumbnail(media: MediaReference, sourceUs: Long, width: Int, height: Int): Bitmap? =
+        thumbnail(ThumbnailRequest(media,sourceUs,width,height))
+    override suspend fun thumbnail(request: ThumbnailRequest): Bitmap? = withContext(Dispatchers.IO) {
+        val (media,sourceUs,width,height,priority)=request
+        if (media.kind == MediaKind.AUDIO) return@withContext null
         val targetWidth = width.coerceIn(8, 512)
         val targetHeight = height.coerceIn(8, 512)
         // Thumbnail requests are deliberately quantized, unlike preview/player seeks.
         val timeUs = if (media.kind == MediaKind.IMAGE) 0L else
             (sourceUs.coerceIn(0, (media.durationUs - 1).coerceAtLeast(0)) / 250_000L) * 250_000L
         val key = cacheKey("${media.uri}|${media.sizeBytes}|${media.durationUs}|$timeUs|$targetWidth|$targetHeight")
-        memory.get(key)?.let { return it }
-        return withContext(Dispatchers.IO) {
+        memory.get(key)?.let { return@withContext it }
+        queue.submit(key,priority) {
             locks[(key.hashCode() and Int.MAX_VALUE) % locks.size].withLock {
                 memory.get(key)?.let { return@withLock it }
                 try {
@@ -66,12 +74,12 @@ class ThumbnailCache(context: Context) : ThumbnailProvider {
                         return@withLock fromDisk
                     }
                     val bitmap = decodeSlots.withPermit {
-                        coroutineContext.ensureActive()
+                        currentCoroutineContext().ensureActive()
                         val source = if (media.kind == MediaKind.IMAGE) decodeImage(Uri.parse(media.uri), targetWidth, targetHeight)
                         else decodeVideo(Uri.parse(media.uri), timeUs, targetWidth, targetHeight)
                         source?.let { centerCrop(it, targetWidth, targetHeight) }
                     } ?: return@withLock null
-                    coroutineContext.ensureActive()
+                    currentCoroutineContext().ensureActive()
                     memory.put(key, bitmap)
                     // Disk failures do not prevent a decoded thumbnail being displayed.
                     runCatching {

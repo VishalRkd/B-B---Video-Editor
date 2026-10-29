@@ -13,6 +13,8 @@ import com.bbvideoeditor.core.CanvasSettings
 import com.bbvideoeditor.core.TextAlignment
 import com.bbvideoeditor.core.TextContent
 import com.bbvideoeditor.core.TextFont
+import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
@@ -20,18 +22,36 @@ import kotlin.math.max
 data class RasterizedText(val bitmap: Bitmap, val logicalWidth: Float, val logicalHeight: Float)
 
 /** Shared typography for the inspector, canvas interaction, preview, and export. No Activity refs. */
-class TextBitmapCache {
+class TextBitmapCache(private val maximumBytes:Int = 32 * 1024 * 1024) {
     private data class Key(val text: TextContent, val width: Int, val height: Int, val outputHeight: Int)
-    private val cache = object : LruCache<Key, RasterizedText>(32 * 1024 * 1024) {
+    private val cache = object : LruCache<Key, RasterizedText>(maximumBytes) {
         override fun sizeOf(key: Key, value: RasterizedText) = value.bitmap.allocationByteCount
     }
 
-    // Call on a worker/render thread. Eviction never recycles bitmaps still held by UI/GL consumers.
+    private val worker=ThreadPoolExecutor(1,1,30,TimeUnit.SECONDS,ArrayBlockingQueue(32),
+        { work -> Thread(work,"FrameStudio:TextRaster").apply{isDaemon=true} },ThreadPoolExecutor.AbortPolicy()).apply { allowCoreThreadTimeOut(true) }
+    val renderMisses=AtomicLong()
+    val rasterCount=AtomicLong()
+    /** A correctness fallback may wait for the bounded worker, but never rasterizes on GL. */
+    fun getForRender(content:TextContent,canvas:CanvasSettings,outputHeight:Int):RasterizedText {
+        peek(content,canvas,outputHeight)?.let{return it}
+        renderMisses.incrementAndGet()
+        val task=FutureTask { get(content,canvas,outputHeight) }
+        try{worker.execute(task)}catch(_:RejectedExecutionException){worker.queue.put(task)}
+        return task.get()
+    }
+    fun prefetch(content:TextContent,canvas:CanvasSettings,outputHeight:Int) {
+        if(peek(content,canvas,outputHeight)!=null)return
+        try{worker.execute { get(content,canvas,outputHeight) }}catch(_:RejectedExecutionException){ /* Current caption keeps priority over speculative work. */ }
+    }
+    // Call on a worker thread. Eviction never recycles bitmaps still held by UI/GL consumers.
     @Synchronized
     fun get(content: TextContent, canvas: CanvasSettings, outputHeight: Int): RasterizedText {
         val key = Key(content, canvas.width, canvas.height, outputHeight)
-        return cache.get(key) ?: TextRasterizer.render(content, canvas, outputHeight).also { cache.put(key, it) }
+        return cache.get(key) ?: TextRasterizer.render(content, canvas, outputHeight).also { rasterCount.incrementAndGet();cache.put(key, it) }
     }
+    val memoryBytes: Int get()=cache.size()
+    fun peek(content:TextContent,canvas:CanvasSettings,outputHeight:Int):RasterizedText? = cache.get(Key(content,canvas.width,canvas.height,outputHeight))
     // LruCache is thread-safe. Main-thread trim callbacks must not wait on rasterization's lock.
     fun clearMemory() = cache.evictAll()
 }

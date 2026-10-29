@@ -38,10 +38,14 @@ data class MediaReference(
     val hasAudio: Boolean = false,
     val mimeType: String = "",
     val sizeBytes: Long = 0,
+    val codecMimeType: String = "",
+    val colorTransfer: Int = 0,
+    val audioChannels: Int = 0,
+    val audioSampleRate: Int = 0,
 ) {
     init {
         require(id.isNotBlank() && uri.isNotBlank()) { "Media requires an identifier and URI" }
-        require(durationUs >= 0 && width >= 0 && height >= 0 && sizeBytes >= 0)
+        require(durationUs >= 0 && width >= 0 && height >= 0 && sizeBytes >= 0 && audioChannels >= 0 && audioSampleRate >= 0)
         require(frameRate.isFinite() && frameRate >= 0)
     }
     val displayWidth: Int get() = if (rotationDegrees.mod(180) == 90) height else width
