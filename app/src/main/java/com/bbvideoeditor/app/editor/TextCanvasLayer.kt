@@ -15,6 +15,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bbvideoeditor.app.diagnostics.beginEngineTrace
+import com.bbvideoeditor.app.diagnostics.endEngineTrace
 import com.bbvideoeditor.app.render.RasterizedText
 import com.bbvideoeditor.app.render.TextBitmapCache
 import com.bbvideoeditor.app.ui.Accent
@@ -26,14 +28,21 @@ import kotlin.math.*
 /** Canvas adapter for the shared text rasterizer. Every gesture writes the real command model. */
 @Composable
 fun TextCanvasLayer(editor: EditorViewModel, bitmaps: TextBitmapCache, modifier: Modifier = Modifier) {
-    val state by editor.state.collectAsStateWithLifecycle()
+    val tracing = beginEngineTrace("TextCanvasComposition")
+    val state by editor.document.collectAsStateWithLifecycle()
+    val transport = editor.transport.collectAsStateWithLifecycle()
     val indices = remember(state.project.timeline.tracks) {
         state.project.timeline.tracks.filter { it.type == TrackType.TEXT }.map(::TrackIndex)
     }
     // Like the native video surface, hold the final frame when transport reaches the end.
-    val displayTimeUs = state.positionUs.coerceAtMost((state.project.durationUs - 1).coerceAtLeast(0))
-    val active = indices.mapNotNull { it.clipAt(displayTimeUs) }
-    val requested = indices.flatMap { it.visibleClips(displayTimeUs, displayTimeUs + 1_000_000).take(2) }.map { it.id to requireNotNull(it.text) }
+    val active by remember(indices, transport, state.durationUs) { derivedStateOf(structuralEqualityPolicy()) {
+        val time = transport.value.positionUs.coerceAtMost((state.durationUs - 1).coerceAtLeast(0))
+        indices.mapNotNull { it.clipAt(time) }
+    } }
+    val requested by remember(indices, transport, state.durationUs) { derivedStateOf(structuralEqualityPolicy()) {
+        val time = transport.value.positionUs.coerceAtMost((state.durationUs - 1).coerceAtLeast(0))
+        indices.flatMap { it.visibleClips(time, time + 1_000_000).take(2) }.map { it.id to requireNotNull(it.text) }
+    } }
     val canvas = state.project.canvas
     val rendered by produceState<Pair<Map<String, RasterizedText>, List<String>>>(emptyMap<String, RasterizedText>() to emptyList(), requested, canvas) {
         value = withContext(Dispatchers.Default) {
@@ -138,7 +147,7 @@ fun TextCanvasLayer(editor: EditorViewModel, bitmaps: TextBitmapCache, modifier:
                     }) { drawImage(frame.bitmap.asImageBitmap(), alpha = clip.transform.opacity) }
                 }
             }
-            if (clip.id == state.selectedClipId && !state.playing) {
+            if (clip.id == state.selectedClipId && !transport.value.playing) {
                 val selectionBox = box.withMinimumSize(72.dp.toPx(), 48.dp.toPx())
                 val corners = selectionBox.corners
                 corners.indices.forEach { drawLine(Accent, corners[it], corners[(it + 1) % 4], 1.5.dp.toPx()) }
@@ -151,6 +160,7 @@ fun TextCanvasLayer(editor: EditorViewModel, bitmaps: TextBitmapCache, modifier:
             }
         }
     }
+    endEngineTrace(tracing)
 }
 
 private fun rotate(offset: Offset, degrees: Float): Offset {

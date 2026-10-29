@@ -60,6 +60,7 @@ class TimelinePerformanceTest {
             val editor=EditorViewModel(project)
             compose.runOnUiThread{editor.seek(10_000_000);editor.endScrub()}
             var engine:PreviewEngine?=null
+            val surfaceCounters=PreviewViewCounters()
             if(native)compose.runOnUiThread { engine=PreviewEngine(app,app.compiler,10_000_000,renderTextInPlayer=false) }
             val commits=AtomicInteger()
             compose.runOnUiThread { compose.activity.setContent {
@@ -67,7 +68,8 @@ class TimelinePerformanceTest {
                 SideEffect{commits.incrementAndGet()}
                 DisposableEffect(editor,engine) {
                     editor.onSeek={engine?.seek(it)}
-                    onDispose{editor.onSeek={}}
+                    editor.onScrubbingChanged={engine?.setScrubbing(it)}
+                    onDispose{editor.onSeek={};editor.onScrubbingChanged={}}
                 }
                 LaunchedEffect(document.project){engine?.updateProject(document.project)}
                 EditorTheme {
@@ -77,7 +79,7 @@ class TimelinePerformanceTest {
                             if(engine!=null) {
                                 val surface by engine!!.surface.collectAsState()
                                 Box(modifier) {
-                                    AndroidView(factory={PlayerView(it).apply{useController=false}},update={it.player=surface.player},
+                                    AndroidView(factory={MeasuredPlayerView(it,surfaceCounters).apply{useController=false}},update={it.player=surface.player},
                                         onRelease={it.player=null},modifier=Modifier.fillMaxSize())
                                     TextCanvasLayer(editor,app.textBitmaps,Modifier.fillMaxSize())
                                 }
@@ -101,9 +103,13 @@ class TimelinePerformanceTest {
                 }
                 compose.runOnUiThread{compose.activity.window.addOnFrameMetricsAvailableListener(listener,Handler(frameThread.looper))}
                 var startCpu=0L;var endCpu=0L
+                var surfaceBefore=LongArray(4);var surfaceAfter=LongArray(4)
                 val allocatedBefore=runtime("art.gc.bytes-allocated");val gcBefore=runtime("art.gc.gc-count")
                 val commitsBefore=commits.get()
-                compose.runOnUiThread{startCpu=Debug.threadCpuTimeNanos()}
+                compose.runOnUiThread{startCpu=Debug.threadCpuTimeNanos();surfaceBefore=surfaceCounters.snapshot()}
+                val methodTrace=arguments.getString("timelineMethodTrace")=="true"
+                if(methodTrace)Debug.startMethodTracingSampling(java.io.File(app.cacheDir,"timeline-$count-$assets-$native.trace").path,32*1024*1024,1_000)
+                Trace.beginSection("TimelineGesture")
                 val timeline=compose.onNodeWithTag("timeline")
                 timeline.performTouchInput{down(androidx.compose.ui.geometry.Offset(width*.65f,12f))}
                 repeat(120){step->timeline.performTouchInput {
@@ -111,7 +117,9 @@ class TimelinePerformanceTest {
                 }}
                 timeline.performTouchInput{up()}
                 compose.waitForIdle()
-                compose.runOnUiThread{endCpu=Debug.threadCpuTimeNanos();compose.activity.window.removeOnFrameMetricsAvailableListener(listener)}
+                Trace.endSection()
+                if(methodTrace)Debug.stopMethodTracing()
+                compose.runOnUiThread{endCpu=Debug.threadCpuTimeNanos();surfaceAfter=surfaceCounters.snapshot();compose.activity.window.removeOnFrameMetricsAvailableListener(listener)}
                 frameThread.quitSafely();frameThread.join(2_000)
                 val values=synchronized(frames){frames.filter{it>0}.sorted()}
                 assertTrue("No actual window frames were captured",values.size>=50)
@@ -124,6 +132,8 @@ class TimelinePerformanceTest {
                     "mainCpuMs" to (endCpu-startCpu)/1e6,"allocatedMiB" to (runtime("art.gc.bytes-allocated")-allocatedBefore)/1048576.0,
                     "gcCount" to runtime("art.gc.gc-count")-gcBefore,"rootCommits" to commits.get()-commitsBefore,
                     "pssKb" to Debug.getPss(),"windowGpuMeanMs" to gpu.takeIf{it.isNotEmpty()}?.average()?.div(1e6),
+                    "previewMeasures" to surfaceAfter[0]-surfaceBefore[0],"previewLayouts" to surfaceAfter[1]-surfaceBefore[1],
+                    "previewAttaches" to surfaceAfter[2]-surfaceBefore[2],"previewDetaches" to surfaceAfter[3]-surfaceBefore[3],
                     "debuggable" to (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE!=0),"device" to Build.MODEL,
                     "metrics" to metrics)
                 InstrumentationRegistry.getInstrumentation().sendStatus(2,Bundle().apply{putString("foundation_metrics","timeline $report")})
@@ -134,4 +144,19 @@ class TimelinePerformanceTest {
         }
     }
     private fun runtime(key:String)=Debug.getRuntimeStat(key)?.toLongOrNull() ?: 0L
+
+    private class PreviewViewCounters {
+        var measures=0L;var layouts=0L;var attaches=0L;var detaches=0L
+        fun snapshot()=longArrayOf(measures,layouts,attaches,detaches)
+    }
+    private class MeasuredPlayerView(context:android.content.Context,private val counters:PreviewViewCounters):PlayerView(context) {
+        override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int) {
+            counters.measures++;super.onMeasure(widthMeasureSpec,heightMeasureSpec)
+        }
+        override fun onLayout(changed:Boolean,left:Int,top:Int,right:Int,bottom:Int) {
+            counters.layouts++;super.onLayout(changed,left,top,right,bottom)
+        }
+        override fun onAttachedToWindow(){counters.attaches++;super.onAttachedToWindow()}
+        override fun onDetachedFromWindow(){counters.detaches++;super.onDetachedFromWindow()}
+    }
 }

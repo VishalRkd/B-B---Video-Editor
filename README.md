@@ -19,7 +19,7 @@ JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home ./gradl
 
 The debug APK is installable. A commercial release still needs an owner-controlled signing key, release configuration, and a broader physical-device test matrix. `assembleRelease` builds an unsigned optimized release.
 
-The current engineering results and limits are in [the foundation hardening report](EDITOR_ENGINE_FOUNDATION_FINAL_REPORT.md). Repeatable device/profile commands are in [the benchmark guide](tools/FOUNDATION_BENCHMARKS.md). Media3 is pinned to 1.12.0-alpha02; its packet-processing APIs are experimental.
+Current timeline measurements and limits are in [the interactive performance report](TIMELINE_INTERACTIVE_PERFORMANCE_FINAL_REPORT.md); the earlier engine results remain in [the foundation hardening report](EDITOR_ENGINE_FOUNDATION_FINAL_REPORT.md). Repeatable device/profile commands are in [the benchmark guide](tools/FOUNDATION_BENCHMARKS.md). Media3 is pinned to 1.12.0-alpha02; its packet-processing APIs are experimental.
 
 ## Editing workflow
 

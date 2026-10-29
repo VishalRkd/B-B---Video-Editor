@@ -50,6 +50,7 @@ class EditorViewModel(initialProject: Project) : ViewModel() {
     val committedProject: Project get() = history.project
     var onProjectChanged: (Project) -> Unit = {}
     var onSeek: (Long) -> Unit = {}
+    var onScrubbingChanged: (Boolean) -> Unit = {}
     var onPlayingChanged: (Boolean) -> Unit = {}
     private var gestureBase: Project? = null
     private var gesturePreview: GesturePreview? = null
@@ -101,10 +102,16 @@ class EditorViewModel(initialProject: Project) : ViewModel() {
     fun seek(positionUs: Long, scrubbing: Boolean = true) {
         val position = positionUs.coerceIn(0L, document.value.durationUs)
         if (scrubbing) setPlaying(false)
+        val changed = state.value.scrubbing != scrubbing
         setState(state.value.copy(positionUs = position, scrubbing = scrubbing))
+        if (changed) onScrubbingChanged(scrubbing)
         onSeek(position)
     }
-    fun endScrub() { setState(state.value.copy(scrubbing = false)) }
+    fun endScrub() {
+        if (!state.value.scrubbing) return
+        setState(state.value.copy(scrubbing = false))
+        onScrubbingChanged(false)
+    }
     fun setPlaying(playing: Boolean) {
         if(state.value.playing==playing)return
         setState(state.value.copy(playing = playing))

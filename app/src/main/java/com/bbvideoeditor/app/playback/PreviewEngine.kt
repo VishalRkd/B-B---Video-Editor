@@ -3,7 +3,11 @@ package com.bbvideoeditor.app.playback
 import android.content.Context
 import android.os.Build
 import android.os.Looper
+import android.os.Handler
+import android.hardware.display.DisplayManager
+import android.view.Display
 import android.view.Choreographer
+import com.bbvideoeditor.app.diagnostics.*
 import androidx.annotation.MainThread
 import androidx.media3.common.*
 import androidx.media3.common.util.UnstableApi
@@ -63,6 +67,19 @@ class PreviewEngine(
         .distinctUntilChanged().stateIn(scope,SharingStarted.Eagerly,PreviewSurfaceState(null,false,null))
     val diagnostics = PreviewDiagnostics()
     private val requests = PreviewRequests()
+    private val cadence = PreviewCadence()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val displays = this.context.getSystemService(DisplayManager::class.java)
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(id: Int) = Unit
+        override fun onDisplayRemoved(id: Int) = Unit
+        override fun onDisplayChanged(id: Int) { if (id == Display.DEFAULT_DISPLAY) updateRefreshRate() }
+    }
+    private fun updateRefreshRate() { displays?.getDisplay(Display.DEFAULT_DISPLAY)?.let { cadence.refreshRate(it.refreshRate.toDouble()) } }
+    init { updateRefreshRate(); displays?.registerDisplayListener(displayListener, mainHandler) }
+    private var scrubbing = false
+    private var admissionQueued = false
+    private var lastNativeTargetUs = Long.MIN_VALUE
     private val policy=(this.context as? EditorApplication)?.previewPolicy ?: PreviewResourcePolicy(this.context,EngineResourceBudget.inspect(this.context))
     private val optimizer=(this.context as? EditorApplication)?.optimizedMedia ?: OptimizedPreviewMedia(this.context,compiler)
     private var optimized:ResolvedPreviewMedia?=null
@@ -72,7 +89,8 @@ class PreviewEngine(
     private var pipeline: OutputFramePipeline? = null
     private var binding: RuntimeRenderBinding? = null
     private var compileJob: Job? = null
-    private var clockJob: Job? = null
+    private var clockFramePosted = false
+    private var nextClockNs = 0L
     private var seekPreparationJob: Job? = null
     private var acknowledgementJob: Job? = null
     private var generation = 0L
@@ -99,7 +117,50 @@ class PreviewEngine(
     private val choreographer by lazy { Choreographer.getInstance() }
     private val admission = Choreographer.FrameCallback {
         framePosted = false
-        applyNewestRequest()
+        val wait = cadence.waitNs(System.nanoTime(), scrubbing)
+        if (wait > 0) postAdmission()
+        else {
+            // Let this frame's input/layout/draw run before a potentially blocking public
+            // Player call. Player ownership stays on Main; this is not a looper workaround.
+            admissionQueued = true
+            mainHandler.post { admissionQueued = false; applyNewestRequest() }
+        }
+    }
+    private val playbackClock = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            clockFramePosted = false
+            if (!active || closed || !requestedPlaying || requests.busy || installedRevision != generation) return
+            if (nextClockNs == 0L || frameTimeNanos + cadence.displayPeriodNs / 4 >= nextClockNs) {
+                engineTrace("PreviewClock") { publishPlayerState() }
+                val outputPeriod = 1_000_000_000L / (project?.canvas?.frameRate ?: 30)
+                nextClockNs = frameTimeNanos + maxOf(cadence.displayPeriodNs, outputPeriod)
+            }
+            startClock()
+        }
+    }
+    fun setScrubbing(value: Boolean) {
+        checkMainThread()
+        if (closed || scrubbing == value) return
+        scrubbing = value
+        if (value) return
+        cadence.endGesture()
+        if (framePosted) { choreographer.removeFrameCallback(admission); framePosted = false }
+        val target = state.value.positionUs
+        if (player?.isScrubbingModeEnabled == true) {
+            // Final exact catch-up also exits Media3's own debounce gate. Do it through the
+            // admitted request, after UI drawing, and never restore captured native play intent.
+            acknowledgementJob?.cancel(); seekPreparationJob?.cancel(); requests.abandon()
+            recoveryAnchor = false; flushSeekGate = true
+            seek(target)
+            return
+        }
+        val inFlight = requests.inFlight
+        if (inFlight != null && inFlight.positionUs != target) {
+            acknowledgementJob?.cancel(); requests.abandon(); recoveryAnchor = false; flushSeekGate = true
+        }
+        // Pointer-up restores exact native time, including after equivalent-content skips.
+        if (requests.pending != null || (requests.inFlight == null && lastNativeTargetUs != target)) seek(target)
+        else postAdmission()
     }
     fun updateProject(project: Project) {
         checkMainThread()
@@ -148,18 +209,32 @@ class PreviewEngine(
         if (state.value.positionUs >= durationUs) seek(0)
         if (state.value.error != null) compileProject(forceCompile = true)
         else if (installedRevision == generation && !requests.busy) player?.play()
+        startClock()
     }
     fun pause() {
         checkMainThread()
         requestedPlaying = false
+        stopClock()
         player?.pause()
         mutableState.value = state.value.copy(playing = false, playWhenReady = false)
     }
     fun seek(positionUs: Long) {
         checkMainThread()
         if (closed) return
+        val tracing = beginEngineTrace("PreviewOffer")
         val begin = System.nanoTime()
+        stopClock()
         val target = positionUs.coerceIn(0, durationUs)
+        if (scrubbing) {
+            var periodUs = project?.canvas?.frameDurationUs ?: 33_333L
+            binding?.plan?.visuals?.forEach { track ->
+                track.clipAt(target)?.let { clip -> project?.media?.get(clip.mediaId)?.let { media ->
+                    if (media.kind == MediaKind.VIDEO && media.frameRate > 0)
+                        periodUs = minOf(periodUs, (1_000_000.0 / media.frameRate / clip.speed).toLong().coerceAtLeast(1))
+                } }
+            }
+            cadence.offer(target, begin, periodUs)
+        }
         val request = requests.offer(target, generation)
         diagnostics.requests++
         diagnostics.coalesced = requests.coalesced
@@ -169,17 +244,30 @@ class PreviewEngine(
             phase = PreviewPhase.REQUESTED, buffering = active, error=null)
         postAdmission()
         diagnostics.maxOfferNs = maxOf(diagnostics.maxOfferNs, System.nanoTime()-begin)
+        endEngineTrace(tracing)
     }
     private fun postAdmission() {
-        if (framePosted || awaitingInstalledFrame || !active || closed || installedRevision != generation || requests.inFlight != null) return
+        if (framePosted || admissionQueued || awaitingInstalledFrame || !active || closed || installedRevision != generation || requests.inFlight != null || requests.pending == null) return
         framePosted = true
-        choreographer.postFrameCallback(admission)
+        val wait = cadence.waitNs(System.nanoTime(), scrubbing)
+        if (wait > 0) choreographer.postFrameCallbackDelayed(admission, (wait + 999_999) / 1_000_000)
+        else choreographer.postFrameCallback(admission)
     }
     private fun applyNewestRequest() {
         val output = player ?: return
         if (!active || closed || installedRevision != generation) return
         val request = requests.take(generation) ?: return
         sourceCorrections=0;recoveryAnchor=false
+        val lastSubmission = state.value.submittedPositionUs
+        val installedPlan = binding?.plan
+        if (scrubbing && !redrawParameters && submittedRevision == generation &&
+            lastSubmission != null && installedPlan != null && samePausedContent(installedPlan, lastSubmission, request.positionUs, renderTextInPlayer)) {
+            requests.abandon()
+            diagnostics.record(EngineEvent("EquivalentContentSkipped", generation, request.id, request.positionUs))
+            // Keep the real previous submission timestamp. No new output receipt is invented.
+            mutableState.value = state.value.copy(buffering = false)
+            return
+        }
         if(submittedRevision==generation && state.value.submittedPositionUs==request.positionUs && !redrawParameters) {
             // Reuse an acknowledged surface submission. Seeking an unchanged paused position
             // would flush Media3's input reader although its decoder has no new frame to emit.
@@ -187,7 +275,7 @@ class PreviewEngine(
             mutableState.value=state.value.copy(appliedPositionUs=request.positionUs,appliedGeneration=request.id,
                 submittedGeneration=request.id,buffering=false,phase=PreviewPhase.SUBMITTED)
             diagnostics.record(EngineEvent("SubmittedFrameReused",generation,request.id,request.positionUs))
-            if(requestedPlaying)output.play()
+            if(requestedPlaying){output.play();startClock()}
             return
         }
         seekPreparationJob=scope.launch {
@@ -218,20 +306,27 @@ class PreviewEngine(
         mutableState.value = state.value.copy(appliedPositionUs = request.positionUs,
             appliedGeneration = request.id, phase = PreviewPhase.BUFFERING)
         val nativeStart=System.nanoTime()
+        val tracing=beginEngineTrace(if(redraw)"NativeRedraw" else "NativeSeek")
+        if (scrubbing && pipeline != null && !output.isScrubbingModeEnabled) output.setScrubbingModeEnabled(true)
         if(redraw){diagnostics.redraws++;output.experimentalRedrawLastFrame()}
         else if(pipeline!=null && flushSeekGate) {
             flushSeekGate=false
             seekRecovery(output,request.positionUs.coerceAtMost((durationUs-1).coerceAtLeast(0)))
         }
         else output.seekTo(request.positionUs.coerceAtMost((durationUs-1).coerceAtLeast(0))/1000)
-        diagnostics.nativeCall(System.nanoTime()-nativeStart)
+        if (scrubbing && pipeline != null && !output.isScrubbingModeEnabled) output.setScrubbingModeEnabled(true)
+        endEngineTrace(tracing)
+        val nativeCost = System.nanoTime()-nativeStart
+        diagnostics.nativeCall(nativeCost)
+        cadence.applied(nativeStart, nativeCost)
+        lastNativeTargetUs = request.positionUs
         if(pipeline==null) {
             // Legacy metadata is source/renderer scheduled time, not final output submission.
             // Keep that weaker API 26/27 guarantee explicit rather than manufacturing a receipt.
             requests.abandon()
             mutableState.value=state.value.copy(buffering=output.playbackState==Player.STATE_BUFFERING,phase=PreviewPhase.APPLIED)
             postAdmission()
-            if(requestedPlaying)output.play()
+            if(requestedPlaying){output.play();startClock()}
             return
         }
         armAcknowledgement(request)
@@ -326,7 +421,7 @@ class PreviewEngine(
             diagnostics.record(EngineEvent("FrameSubmitted",generation,completed.id,frame.timeUs))
             mutableState.value = state.value.copy(submittedGeneration=completed.id,
                 buffering=requests.pending != null, phase=PreviewPhase.SUBMITTED)
-            if (requests.pending != null) postAdmission() else if (requestedPlaying) player?.play()
+            if (requests.pending != null) postAdmission() else if (requestedPlaying) { player?.play(); startClock() }
         } else if (requests.pending!=null && requests.inFlight==null) {
             postAdmission()
         } else if (!requests.busy) {
@@ -340,7 +435,7 @@ class PreviewEngine(
         if (!requests.busy && installedRevision == generation) player?.let {
             mutableState.value=state.value.copy(positionUs=it.currentPosition.times(1000).coerceIn(0,durationUs))
         }
-        active=false; requestedPlaying=false; generation++
+        active=false; requestedPlaying=false; scrubbing=false; cadence.reset(); generation++
         compileJob?.cancel(); compileJob=null
         requests.clear()
         if(framePosted){choreographer.removeFrameCallback(admission);framePosted=false}
@@ -350,7 +445,7 @@ class PreviewEngine(
     override fun close() {
         checkMainThread()
         if(closed)return
-        suspendPlayback();closed=true;project=null;binding=null;scope.cancel()
+        suspendPlayback();closed=true;project=null;binding=null;displays?.unregisterDisplayListener(displayListener);scope.cancel()
     }
     private fun compileProject(forceCompile: Boolean = false) {
         if(!active || closed)return
@@ -468,6 +563,11 @@ class PreviewEngine(
                 }
             })
             addListener(object:Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (owner !== player || !active || installedRevision != generation) return
+                    mutableState.value = state.value.copy(playing = isPlaying, playWhenReady = requestedPlaying)
+                    if (isPlaying && requestedPlaying) startClock() else stopClock()
+                }
                 override fun onPlaybackStateChanged(playbackState:Int) {
                     if(owner!==player || installedRevision!=generation || !active)return
                     if(pipeline==null && playbackState==Player.STATE_READY && awaitingInstalledFrame) {
@@ -495,8 +595,13 @@ class PreviewEngine(
             }
         }
     private fun startClock() {
-        if(clockJob?.isActive==true)return
-        clockJob=scope.launch{while(isActive && active){publishPlayerState();delay(if(player?.isPlaying==true)33 else 100)}}
+        if (clockFramePosted || !active || closed || !requestedPlaying || requests.busy || installedRevision != generation) return
+        clockFramePosted = true
+        choreographer.postFrameCallback(playbackClock)
+    }
+    private fun stopClock() {
+        if (clockFramePosted) choreographer.removeFrameCallback(playbackClock)
+        clockFramePosted = false; nextClockNs = 0L
     }
     private fun publishPlayerState() {
         val output=player ?: return
@@ -528,9 +633,10 @@ class PreviewEngine(
     }
     private fun releasePlayer() {
         seekPreparationJob?.cancel();seekPreparationJob=null
-        clockJob?.cancel();clockJob=null;acknowledgementJob?.cancel();acknowledgementJob=null
+        stopClock();acknowledgementJob?.cancel();acknowledgementJob=null
         requests.abandon()
         val previous=player;player=null;installedRevision=-1;submittedRevision=-1;redrawParameters=false;awaitingInstalledFrame=false;flushSeekGate=false
+        cadence.reset(); lastNativeTargetUs = Long.MIN_VALUE
         if(previous!=null){diagnostics.releases++;previous.release()}
         pipeline?.close();pipeline=null;optimized?.close();optimized=null;executorEpoch++
     }

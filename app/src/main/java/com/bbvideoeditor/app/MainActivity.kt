@@ -131,6 +131,7 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
     }
     DisposableEffect(engine, lifecycle) {
         editor.onSeek = engine::seek
+        editor.onScrubbingChanged = engine::setScrubbing
         editor.onPlayingChanged = { playing ->
             if (playing && currentlyExporting) {
                 editor.updatePlayback(editor.state.value.positionUs, false)
@@ -151,7 +152,7 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
         if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && !exporting) engine.resume()
         onDispose {
             lifecycle.removeObserver(observer)
-            editor.onSeek = {}; editor.onPlayingChanged = {}
+            editor.onSeek = {}; editor.onScrubbingChanged = {}; editor.onPlayingChanged = {}
             engine.close()
             editor.updatePlayback(engine.state.value.positionUs, false)
         }

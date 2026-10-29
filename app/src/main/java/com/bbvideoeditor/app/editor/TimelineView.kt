@@ -2,11 +2,11 @@ package com.bbvideoeditor.app.editor
 
 import android.graphics.Paint
 import android.os.SystemClock
+import com.bbvideoeditor.app.diagnostics.*
 import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.animateDecay
 import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -34,10 +34,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -45,7 +49,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -56,6 +60,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bbvideoeditor.app.media.ThumbnailProvider
@@ -99,7 +104,7 @@ fun TimelineView(editor: EditorViewModel, thumbnails: ThumbnailProvider?, modifi
     waveforms: WaveformRepository? = null) {
     val document by editor.document.collectAsStateWithLifecycle()
     val transport by editor.transport.collectAsStateWithLifecycle()
-    TimelineView(document.withTransport(transport), editor, thumbnails, modifier, waveforms)
+    TimelineContent(document, transport.positionUs, editor, thumbnails, modifier, waveforms)
 }
 
 /**
@@ -114,25 +119,46 @@ fun TimelineView(
     modifier: Modifier = Modifier,
     waveforms: WaveformRepository? = null,
 ) {
+    val document = remember(state.project, state.selectedClipId, state.canUndo, state.canRedo, state.message, state.editTextClipId) {
+        EditorDocumentState(state.project, selectedClipId = state.selectedClipId, canUndo = state.canUndo, canRedo = state.canRedo,
+            message = state.message, editTextClipId = state.editTextClipId)
+    }
+    TimelineContent(document, state.positionUs, editor, thumbnails, modifier, waveforms)
+}
+
+@Composable
+private fun TimelineContent(state: EditorDocumentState, positionUs: Long, editor: EditorViewModel,
+    thumbnails: ThumbnailProvider?, modifier: Modifier, waveforms: WaveformRepository?) {
+    val tracing = beginEngineTrace("TimelineComposition")
+    val counters = LocalTimelineRenderCounters.current
+    if (counters != null) SideEffect { counters.timelineCommits++ }
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val rows = rememberLazyListState()
     val motion = remember { TimelineMotion() }
     var bodyWidthPx by remember { mutableIntStateOf(1) }
-    var pixelsPerSecond by remember { mutableDoubleStateOf(with(density) { 72.dp.toPx().toDouble() }) }
+    val scale = remember(density) { mutableDoubleStateOf(with(density) { 72.dp.toPx().toDouble() }) }
+    var pixelsPerSecond by scale
     val labelPx = with(density) { LabelWidth.toPx() }
     val rulerPx = with(density) { RulerHeight.toPx() }
     val edgePx = with(density) { 44.dp.toPx() }
     val handlePx = with(density) { 18.dp.toPx() }
     val snapPx = with(density) { 9.dp.toPx().toDouble() }
     val contentWidthPx = (bodyWidthPx - labelPx).toDouble().coerceAtLeast(1.0)
-    val currentScale by rememberUpdatedState(pixelsPerSecond)
+    val currentScale by scale
     val currentContentWidth by rememberUpdatedState(contentWidthPx)
-    val viewport = TimelineViewport(state.positionUs, pixelsPerSecond)
+    // Publish one viewport snapshot in the UI frame's composition phase. Child content stays
+    // stable, while layer/draw readers see the same frame; no second asynchronous projection.
+    val viewport = rememberUpdatedState(TimelineViewport(positionUs, pixelsPerSecond))
     val derived = remember { TimelineDerivedIndexes() }
     val indexes = remember(state.project.timeline.tracks) { derived.update(state.project.timeline.tracks) }
     val currentIndexes by rememberUpdatedState(indexes)
+
+    fun seekViewport(targetUs: Long) = engineTrace("ViewportPan") {
+        val target = targetUs.coerceIn(0, editor.document.value.durationUs)
+        editor.seek(target)
+    }
 
     LaunchedEffect(state.selectedClipId) {
         val index = state.project.timeline.tracks.indexOfFirst { track -> track.clips.any { it.id == state.selectedClipId } }
@@ -184,7 +210,7 @@ fun TimelineView(
                     var vertical = false
                     var allReleased = false
                     var lastTick = SystemClock.uptimeMillis()
-                    val velocity = VelocityTracker().apply { addPosition(down.uptimeMillis, down.position) }
+                    val velocity = VelocityTracker().apply { addPointerInputChange(down) }
                     val holdDeadline = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
 
                     fun startEdit(kind: EditKind) {
@@ -252,7 +278,7 @@ fun TimelineView(
                                         val center = (editor.state.value.positionUs + scrollUs).coerceAtLeast(0)
                                         // Preview first so extending a clip also extends the allowable seek range.
                                         updateEdit(center)
-                                        editor.seek(center)
+                                        seekViewport(center)
                                     }
                                 }
                                 lastTick = now
@@ -263,7 +289,17 @@ fun TimelineView(
                             val primary = event.changes.firstOrNull { it.id == down.id } ?: event.changes.first()
                             position = primary.position
                             allReleased = pressed.isEmpty()
-                            velocity.addPosition(primary.uptimeMillis, primary.position)
+                            engineTraceCounter("TimelineInputAgeUs", (now - primary.uptimeMillis) * 1_000)
+                            // Preserve platform-batched motion history when UI frames run late.
+                            // Tracking only the newest point can turn a real fling into zero velocity.
+                            velocity.addPointerInputChange(primary)
+                            if (allReleased && primary.position != primary.previousPosition) {
+                                // Android may deliver the last coordinate only with ACTION_UP.
+                                // Apply it before history commit and exact preview catch-up.
+                                if (edit != null) updateEdit()
+                                else if (horizontal || pinching) seekViewport(TimelineViewport(editor.state.value.positionUs, currentScale)
+                                    .pan((primary.position.x - primary.previousPosition.x).toDouble()).centerUs)
+                            }
                             if (event.changes.count { it.pressed || it.previousPressed } > 1 && pressed.size > 1) {
                                 if (edit != null) { editor.cancelGesture(); edit = null; motion.draggingClipId = null; motion.snapTargetUs = null }
                                 pinching = true
@@ -272,7 +308,7 @@ fun TimelineView(
                                 val old = TimelineViewport(editor.state.value.positionUs, currentScale)
                                 val next = old.zoom(event.calculateZoom().toDouble(), (focal.x - labelPx).toDouble(), currentContentWidth)
                                 pixelsPerSecond = next.pixelsPerSecond
-                                editor.seek(next.pan(event.calculatePan().x.toDouble()).centerUs)
+                                seekViewport(next.pan(event.calculatePan().x.toDouble()).centerUs)
                                 event.changes.forEach { it.consume() }
                             } else if (edit != null) {
                                 if (!allReleased) updateEdit()
@@ -286,12 +322,12 @@ fun TimelineView(
                                 }
                                 if (horizontal && !primary.isConsumed) {
                                     val movement = primary.position.x - primary.previousPosition.x
-                                    editor.seek(TimelineViewport(editor.state.value.positionUs, currentScale).pan(movement.toDouble()).centerUs)
+                                    seekViewport(TimelineViewport(editor.state.value.positionUs, currentScale).pan(movement.toDouble()).centerUs)
                                     primary.consume()
                                 } else if (primary.isConsumed) vertical = true
                             } else if (pinching && !allReleased) {
                                 // Continue one-finger panning after one finger lifts from a pinch.
-                                editor.seek(TimelineViewport(editor.state.value.positionUs, currentScale).pan((primary.position.x - primary.previousPosition.x).toDouble()).centerUs)
+                                seekViewport(TimelineViewport(editor.state.value.positionUs, currentScale).pan((primary.position.x - primary.previousPosition.x).toDouble()).centerUs)
                                 primary.consume()
                             }
                         }
@@ -299,22 +335,31 @@ fun TimelineView(
                             editor.finishGesture()
                         } else if (!moved && allReleased) {
                             if (hitClip != null) editor.select(hitClip.id)
-                            else { editor.select(null); editor.seek(downTime) }
+                            else { editor.select(null); seekViewport(downTime) }
                         } else if (horizontal && !pinching && allReleased) {
                             val speed = velocity.calculateVelocity().x
+                            if (counters != null) counters.lastReleaseVelocity = speed
+                            engineTraceCounter("TimelineReleaseVelocity", speed.toLong())
                             if (abs(speed) > 100f) {
+                                if (counters != null) counters.flingStarts++
                                 motion.fling = scope.launch {
                                     var previous = 0f
+                                    val tracing = beginEngineTrace("TimelineFlingStart")
+                                    endEngineTrace(tracing)
                                     try {
                                         AnimationState(initialValue = 0f, initialVelocity = speed)
                                             .animateDecay(exponentialDecay(frictionMultiplier = 1.8f)) {
+                                                if (counters != null) counters.flingFrames++
                                                 val delta = value - previous
                                                 previous = value
                                                 val before = editor.state.value.positionUs
-                                                editor.seek(TimelineViewport(before, currentScale).pan(delta.toDouble()).centerUs)
+                                                seekViewport(TimelineViewport(before, currentScale).pan(delta.toDouble()).centerUs)
                                                 if (editor.state.value.positionUs == before && abs(delta) > .1f) cancelAnimation()
                                             }
-                                    } finally { editor.endScrub() }
+                                    } finally {
+                                        val tracing = beginEngineTrace("TimelineFlingEnd"); endEngineTrace(tracing)
+                                        editor.endScrub()
+                                    }
                                 }
                             }
                         }
@@ -345,7 +390,7 @@ fun TimelineView(
             }
             Canvas(Modifier.fillMaxSize()) {
                 motion.snapTargetUs?.let { target ->
-                    val x = labelPx + viewport.timeToX(target, contentWidthPx).toFloat()
+                    val x = labelPx + viewport.value.timeToX(target, contentWidthPx).toFloat()
                     if (x in labelPx..size.width) drawLine(Accent.copy(alpha = .45f), Offset(x, rulerPx), Offset(x, size.height), 1.dp.toPx())
                 }
                 val x = labelPx + contentWidthPx.toFloat() / 2
@@ -354,6 +399,7 @@ fun TimelineView(
             }
         }
     }
+    endEngineTrace(tracing)
 }
 
 private fun trackAt(rows: LazyListState, project: Project, y: Float): Track? {
@@ -413,17 +459,26 @@ private fun TrackLabel(track: Track, editor: EditorViewModel) {
 }
 
 @Composable
-private fun TimelineRuler(viewport: TimelineViewport, modifier: Modifier) {
+private fun TimelineRuler(viewportState: State<TimelineViewport>, modifier: Modifier) {
+    val tracing = beginEngineTrace("RulerComposition")
+    val counters = LocalTimelineRenderCounters.current
     val density = LocalDensity.current
     val paint = remember(density) { Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(151, 158, 172); textSize = with(density) { 9.sp.toPx() } } }
+    val labels = remember { object : LinkedHashMap<Pair<Long, Long>, String>(64, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<Long, Long>, String>?) = size > 128
+    } }
     Canvas(modifier.background(Ink).clipToBounds()) {
+        if (counters != null) counters.rulerDraws++
+        val viewport = viewportState.value
         val stepUs = rulerStepUs(viewport.pixelsPerSecond, 64.dp.toPx().toDouble())
         val left = viewport.xToTime(0.0, size.width.toDouble())
         val right = viewport.xToTime(size.width.toDouble(), size.width.toDouble())
         rulerTicks((left - stepUs).coerceAtLeast(0), right, stepUs).take(200).forEach { tick ->
             val x = viewport.timeToX(tick, size.width.toDouble()).toFloat()
             drawLine(Muted, Offset(x, size.height - 6.dp.toPx()), Offset(x, size.height), 1f)
-            val label = if (stepUs < MICROS_PER_SECOND) "%.2fs".format(java.util.Locale.ROOT, tick / 1_000_000.0) else formatTime(tick)
+            val label = labels.getOrPut(tick to stepUs) {
+                if (stepUs < MICROS_PER_SECOND) "%.2fs".format(java.util.Locale.ROOT, tick / 1_000_000.0) else formatTime(tick)
+            }
             drawContext.canvas.nativeCanvas.drawText(label, x + 4.dp.toPx(), 13.dp.toPx(), paint)
             for (minor in 1..3) {
                 val mx = x + (stepUs.toDouble() / MICROS_PER_SECOND * viewport.pixelsPerSecond * minor / 4).toFloat()
@@ -431,57 +486,74 @@ private fun TimelineRuler(viewport: TimelineViewport, modifier: Modifier) {
             }
         }
     }
+    endEngineTrace(tracing)
 }
 
 @Composable
 private fun TimelineTrack(
-    track: Track, project: Project, selectedId: String?, viewport: TimelineViewport, widthPx: Double,
+    track: Track, project: Project, selectedId: String?, viewport: State<TimelineViewport>, widthPx: Double,
     index: TrackIndex, thumbnails: ThumbnailProvider?, waveforms: WaveformRepository?, editor: EditorViewModel,
     modifier: Modifier, draggingId: String?,
 ) {
-    val density = LocalDensity.current
+    val tracing = beginEngineTrace("TrackComposition")
+    val counters = LocalTimelineRenderCounters.current
+    if (counters != null) SideEffect { counters.trackCommits++ }
     val color = when (track.type) { TrackType.AUDIO -> AudioColor; TrackType.OVERLAY, TrackType.TEXT -> OverlayColor; else -> VideoColor }
-    val leftTime = viewport.xToTime(-60.0, widthPx)
-    val rightTime = viewport.xToTime(widthPx + 60.0, widthPx)
-    val clips = remember(index, leftTime, rightTime) { index.visibleClips(leftTime, rightTime) }
+    val clips by remember(index, viewport, widthPx) { derivedStateOf(structuralEqualityPolicy()) {
+        val view = viewport.value
+        engineTrace("VisibleRangeQuery") { index.visibleClips(view.xToTime(-60.0, widthPx), view.xToTime(widthPx + 60.0, widthPx)) }
+    } }
     Box(modifier.fillMaxHeight().clipToBounds().background(color.copy(alpha = .06f))) {
         Canvas(Modifier.fillMaxSize()) { drawLine(PanelRaised, Offset(0f, size.height), Offset(size.width, size.height), 1f) }
         if (track.clips.isEmpty()) Text("Add ${when (track.type) { TrackType.AUDIO -> "audio"; TrackType.TEXT -> "text"; else -> "media" }}", Modifier.padding(12.dp).align(Alignment.CenterStart), color = Muted.copy(alpha = .5f), fontSize = 10.sp)
-        clips.forEach { clip ->
-            key(clip.id) {
-                val x = viewport.timeToX(clip.startUs, widthPx)
-                val endX = viewport.timeToX(clip.endUs, widthPx)
-                val visibleX = x.coerceAtLeast(-20.0)
-                val visibleEnd = endX.coerceAtMost(widthPx + 20.0)
-                val visibleWidth = (visibleEnd - visibleX).coerceAtLeast(2.0)
-                val media = project.media[clip.mediaId]
-                val moving=draggingId==clip.id
-                val description=remember(clip.text?.text,media?.displayName,clip.id,clip.durationUs,moving) {
-                    "Clip ${clip.text?.text ?: media?.displayName ?: clip.id}, ${formatTime(clip.durationUs,true)}${if(moving)", moving" else ""}"
-                }
-                Box(Modifier.offset { IntOffset(visibleX.roundToInt(), with(density) { 7.dp.roundToPx() }) }
-                    .width(with(density) { visibleWidth.toFloat().toDp() }).height(60.dp)
-                    .graphicsLayer(alpha = if (track.muted) .55f else 1f)
-                    .clip(RoundedCornerShape(7.dp)).background(color)
-                    .border(if (selectedId == clip.id) 2.dp else .5.dp,
-                        if (selectedId == clip.id) Accent else Color.White.copy(alpha = .12f), RoundedCornerShape(7.dp))
-                    .semantics {
-                        contentDescription = description
-                        onClick("Select clip") { editor.select(clip.id); true }
-                    }) {
-                    if (media != null && media.kind != MediaKind.AUDIO && track.type != TrackType.AUDIO && thumbnails != null)
-                        ThumbnailStrip(media, clip, x, visibleX, visibleWidth, viewport.pixelsPerSecond, thumbnails)
-                    if (media != null && (track.type == TrackType.AUDIO || media.kind == MediaKind.AUDIO) && waveforms != null)
-                        WaveformStrip(media, clip, x, visibleX, visibleWidth, viewport.pixelsPerSecond, waveforms, Modifier.fillMaxWidth().height(30.dp).align(Alignment.BottomCenter))
-                    Text(clip.text?.text ?: media?.displayName ?: "Missing media", Modifier.fillMaxWidth().background(Color.Black.copy(alpha = .48f)).padding(horizontal = 10.dp, vertical = 3.dp), color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (selectedId == clip.id && !track.locked) {
-                        if (x >= -1) TrimHandle(true, Modifier.align(Alignment.CenterStart))
-                        if (endX <= widthPx + 1) TrimHandle(false, Modifier.align(Alignment.CenterEnd))
-                    }
-                }
-            }
+        clips.forEach { clip -> key(clip.id) {
+            TimelineClip(clip, project.media[clip.mediaId], track, selectedId == clip.id, viewport, widthPx,
+                thumbnails, waveforms, editor, draggingId == clip.id, color)
+        } }
+    }
+    endEngineTrace(tracing)
+}
+
+@Composable
+private fun TimelineClip(clip: Clip, media: MediaReference?, track: Track, selected: Boolean,
+    viewport: State<TimelineViewport>, widthPx: Double, thumbnails: ThumbnailProvider?, waveforms: WaveformRepository?,
+    editor: EditorViewModel, moving: Boolean, color: Color) {
+    val tracing = beginEngineTrace("ClipComposition")
+    val counters = LocalTimelineRenderCounters.current
+    if (counters != null) SideEffect { counters.clipCommits++ }
+    val density = LocalDensity.current
+    val scale by remember(viewport) { derivedStateOf { viewport.value.pixelsPerSecond } }
+    val window by remember(clip, viewport, widthPx) { derivedStateOf(structuralEqualityPolicy()) { timelineClipWindow(clip, viewport.value, widthPx) } }
+    val windowWidth = ((window.endUs - window.startUs).toDouble() / MICROS_PER_SECOND * scale).coerceAtLeast(2.0)
+    val description = remember(clip.text?.text, media?.displayName, clip.id, clip.durationUs, moving) {
+        "Clip ${clip.text?.text ?: media?.displayName ?: clip.id}, ${formatTime(clip.durationUs, true)}${if (moving) ", moving" else ""}"
+    }
+    val shape = remember { RoundedCornerShape(7.dp) }
+    Box(Modifier.wrapContentWidth(Alignment.Start, unbounded = true)
+        .width(with(density) { windowWidth.toFloat().toDp() }).height(60.dp)
+        .graphicsLayer {
+            translationX = viewport.value.timeToX(window.startUs, widthPx).toFloat()
+            translationY = 7.dp.toPx()
+            alpha = if (track.muted) .55f else 1f
+            this.shape = shape; this.clip = true
+        }.background(color)
+        .border(if (selected) 2.dp else .5.dp, if (selected) Accent else Color.White.copy(alpha = .12f), shape)
+        .semantics { contentDescription = description; onClick("Select clip") { editor.select(clip.id); true } }) {
+        if (media != null && media.kind != MediaKind.AUDIO && track.type != TrackType.AUDIO && thumbnails != null)
+            ThumbnailStrip(media, clip, window, viewport, widthPx, scale, thumbnails)
+        if (media != null && (track.type == TrackType.AUDIO || media.kind == MediaKind.AUDIO) && waveforms != null)
+            WaveformStrip(media, clip, window, scale, waveforms, Modifier.fillMaxWidth().height(30.dp).align(Alignment.BottomCenter))
+        Text(clip.text?.text ?: media?.displayName ?: "Missing media", Modifier
+            .graphicsLayer { translationX = maxOf(0.0, -viewport.value.timeToX(window.startUs, widthPx)).toFloat() }
+            .width(with(density) { minOf(windowWidth, widthPx + 40).toFloat().toDp() })
+            .background(Color.Black.copy(alpha = .48f)).padding(horizontal = 10.dp, vertical = 3.dp),
+            color = Color.White, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (selected && !track.locked) {
+            if (window.startUs == clip.startUs) TrimHandle(true, Modifier.align(Alignment.CenterStart))
+            if (window.endUs == clip.endUs) TrimHandle(false, Modifier.align(Alignment.CenterEnd))
         }
     }
+    endEngineTrace(tracing)
 }
 
 @Composable
@@ -493,65 +565,104 @@ private fun TrimHandle(left: Boolean, modifier: Modifier) {
 }
 
 @Composable
-private fun WaveformStrip(media: MediaReference, clip: Clip, originalX: Double, visibleX: Double, visibleWidth: Double, pixelsPerSecond: Double,
+private fun WaveformStrip(media: MediaReference, clip: Clip, window: TimelineClipWindow, pixelsPerSecond: Double,
     repository: WaveformRepository, modifier: Modifier) {
-    val firstSource=(clip.sourceRange.startUs+(visibleX-originalX)/pixelsPerSecond*MICROS_PER_SECOND*clip.speed)
-        .toLong().coerceIn(0,(media.durationUs-1).coerceAtLeast(0))
-    val lastSource=(firstSource+visibleWidth/pixelsPerSecond*MICROS_PER_SECOND*clip.speed).toLong()
-        .coerceIn(firstSource+1,media.durationUs.coerceAtLeast(firstSource+1))
-    val span=(lastSource-firstSource).coerceAtLeast(1)
-    val quantum=when { span<500_000 -> 100_000L; span<2_000_000 -> 500_000L
-        span<10_000_000 -> 2_000_000L; else -> 5_000_000L }
-    val windowStart=firstSource/quantum*quantum
-    val windowEnd=minOf(media.durationUs,((lastSource+quantum-1)/quantum)*quantum).coerceAtLeast(windowStart+1)
-    val desiredBuckets=(visibleWidth/2*(windowEnd-windowStart)/span).toInt().coerceIn(64,4096)
-    val buckets=listOf(64,128,256,512,1024,2048,4096).first{it>=desiredBuckets}
-    val slice by produceState<com.bbvideoeditor.app.media.WaveformSlice?>(null,media.uri,windowStart,windowEnd,buckets) {
-        repository.progressiveWindow(media,windowStart,windowEnd,buckets).collect { value=it }
+    val tracing = beginEngineTrace("WaveformComposition")
+    val counters = LocalTimelineRenderCounters.current
+    if (counters != null) SideEffect { counters.waveformCommits++ }
+    val firstSource = clip.sourceTimeAt(window.startUs).coerceIn(0, (media.durationUs - 1).coerceAtLeast(0))
+    val lastSource = (clip.sourceTimeAt(window.endUs - 1) + 1).coerceIn(firstSource + 1, media.durationUs.coerceAtLeast(firstSource + 1))
+    val span = (lastSource - firstSource).coerceAtLeast(1)
+    val quantum = when { span < 500_000 -> 100_000L; span < 2_000_000 -> 500_000L
+        span < 10_000_000 -> 2_000_000L; else -> 5_000_000L }
+    val windowStart = firstSource / quantum * quantum
+    val windowEnd = minOf(media.durationUs, ((lastSource + quantum - 1) / quantum) * quantum).coerceAtLeast(windowStart + 1)
+    val width = (window.endUs - window.startUs).toDouble() / MICROS_PER_SECOND * pixelsPerSecond
+    val desired = (width / 2 * (windowEnd - windowStart) / span).toInt().coerceIn(64, 4096)
+    var buckets = 64; while (buckets < desired) buckets *= 2
+    val slice = produceState<com.bbvideoeditor.app.media.WaveformSlice?>(null, repository, media, windowStart, windowEnd, buckets) {
+        repository.progressiveWindow(media, windowStart, windowEnd, buckets).collect { value = it }
     }
-    val samples=slice?.peaks ?: FloatArray(0)
-    Canvas(modifier) {
-        if (samples.isEmpty() || media.durationUs <= 0) return@Canvas
-        val step = 3.dp.toPx()
-        var x = 0f
-        while (x < size.width) {
-            val localUs = (visibleX + x - originalX) / pixelsPerSecond * MICROS_PER_SECOND
-            val sourceUs = clip.sourceRange.startUs + localUs * clip.speed
-            val current=slice ?: return@Canvas
-            if(sourceUs<current.startUs || sourceUs>=current.decodedThroughUs){x+=step;continue}
-            val bucket = ((sourceUs-current.startUs)/(current.endUs-current.startUs)*samples.size).toInt().coerceIn(samples.indices)
-            val height = samples[bucket].coerceIn(0f, 1f) * size.height * .45f
-            drawLine(Color.White.copy(alpha = .72f), Offset(x, size.height / 2 - height), Offset(x, size.height / 2 + height), 1.5.dp.toPx())
-            x += step
-        }
-    }
-}
-
-@Composable
-private fun ThumbnailStrip(media: MediaReference, clip: Clip, originalX: Double, visibleX: Double, visibleWidth: Double, pixelsPerSecond: Double, provider: ThumbnailProvider) {
-    val density = LocalDensity.current
-    val tilePx = with(density) { 64.dp.toPx().roundToInt() }.coerceAtLeast(1)
-    val first = floor((visibleX - originalX) / tilePx).toLong().coerceAtLeast(0)
-    val count = (visibleWidth / tilePx).toInt() + 2
-    Box(Modifier.fillMaxSize()) {
-        repeat(count.coerceAtMost(32)) { offset ->
-            val tile = first + offset
-            val sourceUs = (clip.sourceRange.startUs + tile * tilePx / pixelsPerSecond * MICROS_PER_SECOND * clip.speed).roundToLong().coerceIn(clip.sourceRange.startUs, clip.sourceRange.endUs - 1)
-            key(media.id, tile, sourceUs / 250_000) {
-                val bitmap by produceState<android.graphics.Bitmap?>(null, media.uri, sourceUs / 250_000, tilePx) {
-                    val tileStart=originalX+tile*tilePx
-                    val priority=if(tileStart+tilePx>visibleX && tileStart<visibleX+visibleWidth)
-                        com.bbvideoeditor.app.media.AssetPriority.VISIBLE else com.bbvideoeditor.app.media.AssetPriority.NEAR_VIEWPORT
-                    value = provider.thumbnail(com.bbvideoeditor.app.media.ThumbnailRequest(media,sourceUs,tilePx,tilePx,priority))
-                }
-                bitmap?.let { b ->
-                    Image(b.asImageBitmap(), null,
-                        Modifier.offset { IntOffset((originalX + tile * tilePx - visibleX).roundToInt(), 0) }
-                            .width(with(density) { tilePx.toDp() }).fillMaxHeight(), contentScale = ContentScale.Crop)
+    Box(modifier.drawWithCache {
+        val current = slice.value
+        val path = engineTrace("WaveformGeometry") {
+            if (counters != null) counters.waveformGeometry++
+            Path().apply {
+                if (current != null && current.peaks.isNotEmpty()) {
+                    val step = 3.dp.toPx(); var x = 0f
+                    while (x < size.width) {
+                        val time = window.startUs + (x / pixelsPerSecond * MICROS_PER_SECOND).toLong()
+                        val source = clip.sourceTimeAt(time.coerceAtMost(clip.endUs - 1))
+                        if (source >= current.startUs && source < current.decodedThroughUs) {
+                            val bucket = ((source - current.startUs).toDouble() / (current.endUs - current.startUs) * current.peaks.size).toInt().coerceIn(current.peaks.indices)
+                            val height = current.peaks[bucket].coerceIn(0f, 1f) * size.height * .45f
+                            moveTo(x, size.height / 2 - height); lineTo(x, size.height / 2 + height)
+                        }
+                        x += step
+                    }
                 }
             }
         }
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
+        onDrawBehind { engineTrace("WaveformDraw") { if (counters != null) counters.waveformDraws++; drawPath(path, Color.White.copy(alpha = .72f), style = stroke) } }
+    })
+    endEngineTrace(tracing)
+}
+
+private data class ThumbnailRange(val first: Long, val last: Long)
+private data class ThumbnailTile(val index: Long, val bitmap: State<ImageBitmap?>)
+
+@Composable
+private fun ThumbnailStrip(media: MediaReference, clip: Clip, window: TimelineClipWindow,
+    viewport: State<TimelineViewport>, widthPx: Double, pixelsPerSecond: Double, provider: ThumbnailProvider) {
+    val tracing = beginEngineTrace("ThumbnailComposition")
+    val counters = LocalTimelineRenderCounters.current
+    if (counters != null) SideEffect { counters.thumbnailCommits++ }
+    val density = LocalDensity.current
+    val tilePx = with(density) { 64.dp.toPx().roundToInt() }.coerceAtLeast(1)
+    val range by remember(clip, viewport, widthPx, pixelsPerSecond, tilePx) { derivedStateOf(structuralEqualityPolicy()) {
+        val view = viewport.value
+        val left = (view.xToTime(0.0, widthPx) - clip.startUs).toDouble() / MICROS_PER_SECOND * pixelsPerSecond
+        val right = (view.xToTime(widthPx, widthPx) - clip.startUs).toDouble() / MICROS_PER_SECOND * pixelsPerSecond
+        val last = ceil(clip.durationUs.toDouble() / MICROS_PER_SECOND * pixelsPerSecond / tilePx).toLong() - 1
+        val first = (floor(left / tilePx).toLong() - 1).coerceIn(0, last.coerceAtLeast(0))
+        ThumbnailRange(first, minOf(last, ceil(right / tilePx).toLong() + 1, first + 31).coerceAtLeast(first))
+    } }
+    val images = ArrayList<ThumbnailTile>()
+    for (tile in range.first..range.last) key(media.id, tile) {
+        val timelineUs = (clip.startUs + tile * tilePx.toDouble() / pixelsPerSecond * MICROS_PER_SECOND).toLong().coerceIn(clip.startUs, clip.endUs - 1)
+        val sourceUs = clip.sourceTimeAt(timelineUs)
+        val bitmap = produceState<ImageBitmap?>(null, provider, media, sourceUs / 250_000, tilePx) {
+            val view = viewport.value
+            val x = view.timeToX(timelineUs, widthPx)
+            val priority = if (x + tilePx > 0 && x < widthPx) com.bbvideoeditor.app.media.AssetPriority.VISIBLE else com.bbvideoeditor.app.media.AssetPriority.NEAR_VIEWPORT
+            value = engineTrace("ThumbnailLookup") {
+                // The suspend boundary is inside the provider; trace just synchronous setup.
+                com.bbvideoeditor.app.media.ThumbnailRequest(media, sourceUs, tilePx, tilePx, priority)
+            }.let { provider.thumbnail(it) }?.asImageBitmap()
+        }
+        images += ThumbnailTile(tile, bitmap)
     }
+    val originPx = (window.startUs - clip.startUs).toDouble() / MICROS_PER_SECOND * pixelsPerSecond
+    Canvas(Modifier.fillMaxSize()) {
+        engineTrace("ThumbnailDraw") {
+            if (counters != null) counters.thumbnailDraws++
+            for (tile in images) {
+                val bitmap = tile.bitmap.value ?: continue
+                val targetRatio = tilePx / size.height.coerceAtLeast(1f)
+                val sourceWidth: Int; val sourceHeight: Int
+                if (bitmap.width.toFloat() / bitmap.height > targetRatio) {
+                    sourceHeight = bitmap.height; sourceWidth = (sourceHeight * targetRatio).roundToInt().coerceIn(1, bitmap.width)
+                } else {
+                    sourceWidth = bitmap.width; sourceHeight = (sourceWidth / targetRatio).roundToInt().coerceIn(1, bitmap.height)
+                }
+                drawImage(bitmap, srcOffset = IntOffset((bitmap.width - sourceWidth) / 2, (bitmap.height - sourceHeight) / 2),
+                    srcSize = IntSize(sourceWidth, sourceHeight), dstOffset = IntOffset((tile.index * tilePx - originPx).roundToInt(), 0),
+                    dstSize = IntSize(tilePx, size.height.roundToInt().coerceAtLeast(1)), filterQuality = FilterQuality.Low)
+            }
+        }
+    }
+    endEngineTrace(tracing)
 }
 
 /** Local to a timeline session, bounded to the current tracks; clip lists are the semantic key. */

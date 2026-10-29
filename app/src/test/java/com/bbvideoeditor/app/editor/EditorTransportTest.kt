@@ -9,6 +9,17 @@ class EditorTransportTest {
     private val clip=Clip(mediaId=media.id,startUs=0,sourceRange=TimeRange(0,10_000_000))
     private val project=Project(media=mapOf(media.id to media),timeline=Timeline(listOf(Track(name="V",type=TrackType.VIDEO,clips=listOf(clip)))))
 
+    @Test fun scrubLifecycleNotifiesOnlyEdgesAndReleaseKeepsTheLatestIntent() {
+        val editor = EditorViewModel(project)
+        val edges = mutableListOf<Boolean>(); var final = -1L
+        editor.onScrubbingChanged = { edges += it; if (!it) final = editor.state.value.positionUs }
+        repeat(120) { editor.seek(it * 10_000L) }
+        editor.endScrub(); editor.endScrub()
+        assertEquals(listOf(true, false), edges)
+        assertEquals(1_190_000L, final)
+        assertSame(project, editor.document.value.project)
+    }
+
     @Test fun transportTicksKeepTheDocumentIdentityAndRevision() {
         val editor=EditorViewModel(project);val document=editor.document.value
         repeat(500){editor.seek(it*10_000L);editor.endScrub();editor.updatePlayback(it*10_000L,true)}

@@ -11,7 +11,7 @@ adb -s emulator-5554 install -r app/build/outputs/apk/androidTest/debug/app-debu
 adb -s emulator-5554 shell am instrument -w -r com.bbvideoeditor.app.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-The four performance methods skip in a normal regression run. Temporal conformance runs by default: actual encoded 24/30/60 FPS moving barcode sources; trim, split, speed and gaps; layered real-surface seek pixels; output-time animation; short AAC and longer sample-exact PCM pulse mapping. Pulse assertions use 50 ms tolerance and video identities allow one source frame. The AAC test measures the encoded source's own onset before applying timeline mappings.
+The four foundation performance methods and two real-time interaction methods skip in a normal regression run. Temporal conformance runs by default: actual encoded 24/30/60 FPS moving barcode sources; trim, split, speed and gaps; layered real-surface seek pixels; output-time animation; short AAC and longer sample-exact PCM pulse mapping. Pulse assertions use 50 ms tolerance and video identities allow one source frame. The AAC test measures the encoded source's own onset before applying timeline mappings.
 
 ## Engine, lifecycle and 4K measurements
 
@@ -75,3 +75,49 @@ Arming saves its own identifiable project, starts a real 120-second foreground e
 ## Interpreting acknowledgement
 
 `submittedPositionUs` means the final writer accepted the composed buffer and its synchronization fence. It does not prove display scanout or that the GPU fence has signalled. Correctness tests separately use PixelCopy to inspect the surface. API 26/27 uses the older backend and exposes the weaker applied/scheduled state; do not interpret it as a submitted-frame receipt. Source switches, lifecycle resume, output-size changes and structural graph changes have separate counters from ordinary transport.
+
+
+## Interactive preview performance
+
+The [timeline performance report](../TIMELINE_INTERACTIVE_PERFORMANCE_FINAL_REPORT.md) records the clean baseline, matched final matrix, attribution, rejected experiments and remaining limitations. Preserve the original 120-move matrix when comparing revisions.
+
+The additional real-clock harness runs 400 clips with real thumbnail/waveform/text assets and layered preview. It uses ActivityScenario and actual MotionEvents, without Compose virtual-clock/idling between moves:
+
+```sh
+adb -s emulator-5554 shell am instrument -w -r -e timelineInteractivePerformance true -e class com.bbvideoeditor.app.editor.TimelineInteractionPerformanceTest com.bbvideoeditor.app.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+It records first-session/warm scrub, verified fling animation, two-pointer zoom, long-press drag, trim, playback-follow, at least 30 seconds of alternating scrub/zoom, and repeated playback/edit/undo/redo. `timeline_interactive_metrics` includes all delivered FrameMetrics, callback loss, Main CPU, managed allocation/GC, stage means, PSS and native/lifecycle counters. Event-injection, reset and final convergence overhead are included. The `ScrubCold` label means the first interaction in that session; graph preparation may already have warmed visible assets and disk caches are retained. It is not an empty-disk-cache claim. The separate 4K test creates a new normalization identity and measures cold generation versus reused layered media. Earlier harness setup/velocity failures are recorded in the report rather than treated as valid speedup baselines. Use the same harness revision for future comparisons. Add `-e timelineCaptureScreen true` only for separate visual inspection; screenshots add work and are not enabled for the timing matrix.
+
+For the complete regression with all performance methods enabled and the four 400-clip matrix rows, add both `-e foundationPerformance true -e foundationTimelineCounts 100 -e timelineInteractivePerformance true` without a class filter. The two process-death methods still require their separate protocol.
+
+Stable Perfetto slices include ViewportPan/TimelineComposition, VisibleRangeQuery, RulerComposition, ThumbnailDraw, WaveformDraw, PreviewOffer, NativeSeek/NativeRedraw and PreviewClock. Tracing is guarded when disabled. Use a separate bounded `android.heapprofd` capture with `heaps: "com.android.art"` for sampled managed allocation stacks; verify overrun/incremental-state statistics before interpreting it. NativeAllocationRegistry/HardwareBuffer accounting is cumulative native allocation reporting, not retained Java heap or a GPU-memory ceiling. Stack-inclusive totals overlap and must not be added together. Sampled byte totals are estimates.
+
+The optional matrix flag `-e timelineMethodTrace true` writes a sampled Java trace to the application's cache. It changes JIT/runtime behavior and adds overhead: use it for attribution, never as the unprofiled timing comparison. Keep raw traces/logs/fixture movies outside Git. Run one instrumentation invocation at a time and serialize it with heavy Gradle/R8 work.
+
+
+For a bounded 35-second ftrace capture, save the following as `/tmp/timeline.cfg`, then start Perfetto immediately before the selected instrumentation invocation. The output path is device-side:
+
+```text
+buffers { size_kb: 131072 fill_policy: DISCARD }
+duration_ms: 35000
+incremental_state_config { clear_period_ms: 5000 }
+data_sources { config { name: "linux.ftrace" ftrace_config {
+  ftrace_events: "sched/sched_switch"
+  ftrace_events: "sched/sched_waking"
+  atrace_categories: "gfx"
+  atrace_categories: "view"
+  atrace_categories: "input"
+  atrace_categories: "dalvik"
+  atrace_apps: "com.bbvideoeditor.app"
+} } }
+data_sources { config { name: "linux.process_stats" process_stats_config { scan_all_processes_on_start: true } } }
+```
+
+```sh
+adb -s emulator-5554 shell perfetto --background --txt -c - -o /data/misc/perfetto-traces/timeline.pftrace < /tmp/timeline.cfg
+# Run the selected matrix/interaction invocation; wait for the capture duration before pulling.
+adb -s emulator-5554 pull /data/misc/perfetto-traces/timeline.pftrace /tmp/timeline.pftrace
+```
+
+For allocation attribution, use a separate config/capture with a 64 MiB trace buffer and add `android.heapprofd` with `process_cmdline: "com.bbvideoeditor.app"`, `heaps: "com.android.art"`, `sampling_interval_bytes: 65536`, `shmem_size_bytes: 33554432` and continuous dumps every five seconds. Sampling is approximate and intrusive. Compare equivalent traced workloads separately from unprofiled frame results. A missing userspace CPU stack on an emulator is a tool limitation; do not present counters as sampled call stacks.
