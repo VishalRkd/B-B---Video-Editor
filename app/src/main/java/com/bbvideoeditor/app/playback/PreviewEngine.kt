@@ -17,8 +17,7 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.transformer.CompositionPlayer
 import com.bbvideoeditor.app.render.*
 import com.bbvideoeditor.app.EditorApplication
-import com.bbvideoeditor.app.media.OptimizedPreviewMedia
-import com.bbvideoeditor.app.media.ResolvedPreviewMedia
+import com.bbvideoeditor.app.media.*
 import com.bbvideoeditor.core.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -30,7 +29,8 @@ data class PreviewState(
     val playing: Boolean = false,
     val playWhenReady: Boolean = false,
     val buffering: Boolean = false,
-    val error: String? = null,
+    val failure: PreviewFailure? = null,
+    val preparation: MediaPreparation? = null,
     val player: Player? = null,
     val warnings: List<String> = emptyList(),
     val quality: PreviewQuality = PreviewQuality.BALANCED,
@@ -42,10 +42,10 @@ data class PreviewState(
     val graphRevision: Long = 0,
     val phase: PreviewPhase = PreviewPhase.EMPTY,
     val admission: PreviewAdmission? = null,
-)
+) { val error: String? get() = failure?.userMessage }
 
 data class PreviewSurfaceState(val player: Player?, val buffering: Boolean, val error: String?,
-    val effectiveQuality:PreviewQuality=PreviewQuality.BALANCED,val optimized:Boolean=false)
+    val effectiveQuality:PreviewQuality=PreviewQuality.BALANCED,val optimized:Boolean=false, val failure:PreviewFailure?=null, val preparation:MediaPreparation?=null)
 
 /** Main owns player calls and small request admission. Immutable plan/graph preparation runs on
  * workers. A frame-paced mailbox owns one in-flight seek and the newest pending target. */
@@ -58,12 +58,14 @@ class PreviewEngine(
     initialPositionUs: Long = 0,
     initialQuality: PreviewQuality = PreviewQuality.BALANCED,
     private val renderTextInPlayer: Boolean = true,
+    compatibilityOverride: MediaCompatibilityService? = null,
+    optimizedStoreOverride: OptimizedMediaStore? = null,
 ) : AutoCloseable {
     private val context = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(PreviewState(positionUs = initialPositionUs.coerceAtLeast(0), quality = initialQuality))
     val state: StateFlow<PreviewState> = mutableState.asStateFlow()
-    val surface: StateFlow<PreviewSurfaceState> = state.map { PreviewSurfaceState(it.player,it.buffering,it.error,it.admission?.quality ?: it.quality,it.admission?.kind==PreviewAdmissionKind.OPTIMIZED_MEDIA_REQUIRED) }
+    val surface: StateFlow<PreviewSurfaceState> = state.map { PreviewSurfaceState(it.player,it.buffering,it.error,it.admission?.quality ?: it.quality,it.admission?.kind==PreviewAdmissionKind.OPTIMIZED_MEDIA_REQUIRED,it.failure,it.preparation) }
         .distinctUntilChanged().stateIn(scope,SharingStarted.Eagerly,PreviewSurfaceState(null,false,null))
     val diagnostics = PreviewDiagnostics()
     private val requests = PreviewRequests()
@@ -82,6 +84,30 @@ class PreviewEngine(
     private var lastNativeTargetUs = Long.MIN_VALUE
     private val policy=(this.context as? EditorApplication)?.previewPolicy ?: PreviewResourcePolicy(this.context,EngineResourceBudget.inspect(this.context))
     private val optimizer=(this.context as? EditorApplication)?.optimizedMedia ?: OptimizedPreviewMedia(this.context,compiler)
+    private val compatibility = compatibilityOverride ?: (this.context as? EditorApplication)?.mediaCompatibility
+        ?: MediaCompatibilityService(AndroidMediaCompatibilityBackend(this.context,EngineResourceBudget.inspect(this.context)))
+    private val preparer = PreviewSourcePreparer(compatibility,policy,optimizedStoreOverride ?: optimizer)
+    private var sourceEvidence = emptyMap<String,SourceEvidence>()
+    private var forcePreparation = emptySet<String>()
+    private var forceProbe = emptySet<String>()
+    private var regenerate = emptySet<String>()
+    private var recoveryAttempts = 0
+    fun compatibilityDetails():String = sourceEvidence.values.joinToString("\n\n") { source ->
+        val media=source.format.media
+        "${media.id}: ${media.codecMimeType} ${media.width}×${media.height} fps=${media.frameRate.takeIf{it>0} ?: "unknown"} profile=${media.codecProfile} level=${media.codecLevel} bitDepth=${media.bitDepth} transfer=${media.colorTransfer}\n" +
+            source.candidates.joinToString("\n"){"${it.name}: ${it.support} size=${it.sizeSupported} rate=${it.rateSupported} full=${it.fullFormatSupported}"} +
+            compatibility.observations(source)?.attempts.orEmpty().joinToString("\n",prefix="\n"){"${it.decoder}: ${it.status} samples=${it.samples} pts=${it.outputTimeUs} ${it.detail.orEmpty()}"}
+    }
+    fun retry() {
+        checkMainThread()
+        val failure=state.value.failure ?: return
+        if(!failure.canRetry)return
+        val ids=failure.sourceMediaId?.let{setOf(it)} ?: failure.candidateSourceIds
+        sourceEvidence.filterKeys{ids.isEmpty() || it in ids}.values.forEach(compatibility::invalidate)
+        forceProbe=ids
+        if(failure.retry==MediaRetry.PREPARE)forcePreparation=forcePreparation+ids
+        recoveryAttempts=0;active=true;compileProject(forceCompile=true)
+    }
     private var optimized:ResolvedPreviewMedia?=null
     private var project: Project? = null
     private var durationUs = 0L
@@ -167,6 +193,7 @@ class PreviewEngine(
         if (closed) return
         if (this.project == project) return
         val previous = this.project
+        forcePreparation=emptySet();forceProbe=emptySet();regenerate=emptySet();recoveryAttempts=0
         this.project = project
         durationUs = project.durationUs
         mutableState.value = state.value.copy(positionUs = state.value.positionUs.coerceIn(0, project.durationUs))
@@ -186,6 +213,9 @@ class PreviewEngine(
             project.timeline.tracks.filter { it.type == TrackType.TEXT }.flatMap { it.clips }.all {
                 it.effects.none { effect -> effect.enabled } && it.properties.isEmpty()
             }) return
+        // A changed source/graph invalidates the old terminal UI even while suspended.
+        // Resume must be allowed to assess the new document instead of retaining that verdict.
+        mutableState.value=state.value.copy(failure=null,preparation=null)
         if (active) compileProject()
     }
 
@@ -197,17 +227,17 @@ class PreviewEngine(
     }
     fun resume() {
         checkMainThread()
-        if (closed || (active && player != null && state.value.error == null)) return
+        if (closed || state.value.failure?.canRetry == false || (active && player != null && state.value.error == null)) return
         active = true
         compileProject(forceCompile = true)
     }
     fun play() {
         checkMainThread()
-        if (!active || closed || durationUs == 0L) return
+        if (!active || closed || durationUs == 0L || state.value.failure?.canRetry == false) return
         requestedPlaying = true
         mutableState.value = state.value.copy(playWhenReady = true)
         if (state.value.positionUs >= durationUs) seek(0)
-        if (state.value.error != null) compileProject(forceCompile = true)
+        if (state.value.failure != null) retry()
         else if (installedRevision == generation && !requests.busy) player?.play()
         startClock()
     }
@@ -221,6 +251,9 @@ class PreviewEngine(
     fun seek(positionUs: Long) {
         checkMainThread()
         if (closed) return
+        if(state.value.failure!=null && player==null) {
+            mutableState.value=state.value.copy(positionUs=positionUs.coerceIn(0,durationUs));return
+        }
         val tracing = beginEngineTrace("PreviewOffer")
         val begin = System.nanoTime()
         stopClock()
@@ -241,7 +274,7 @@ class PreviewEngine(
         diagnostics.record(EngineEvent("SeekRequested",generation,request.id,target))
         convergenceRetries = 0
         mutableState.value = state.value.copy(positionUs = target, requestedGeneration = request.id,
-            phase = PreviewPhase.REQUESTED, buffering = active, error=null)
+            phase = PreviewPhase.REQUESTED, buffering = active, failure=null)
         postAdmission()
         diagnostics.maxOfferNs = maxOf(diagnostics.maxOfferNs, System.nanoTime()-begin)
         endEngineTrace(tracing)
@@ -362,7 +395,7 @@ class PreviewEngine(
                 armAcknowledgement(request)
             } else {
                 mutableState.value = state.value.copy(buffering=false, phase=PreviewPhase.FAILED,
-                    error="Preview did not acknowledge the requested frame. Retry playback or use a lower preview quality.")
+                    failure=PreviewFailure(MediaFailureKind.UNKNOWN,userMessage="Preview did not acknowledge the requested frame. Try playback again.",technicalReason="Output acknowledgement timeout",retry=MediaRetry.RESOURCES))
             }
         }
     }
@@ -440,7 +473,7 @@ class PreviewEngine(
         requests.clear()
         if(framePosted){choreographer.removeFrameCallback(admission);framePosted=false}
         releasePlayer()
-        mutableState.value=state.value.copy(player=null,playing=false,playWhenReady=false,buffering=false,phase=PreviewPhase.SUSPENDED)
+        mutableState.value=state.value.copy(player=null,playing=false,playWhenReady=false,buffering=false,preparation=null,phase=PreviewPhase.SUSPENDED)
     }
     override fun close() {
         checkMainThread()
@@ -459,7 +492,7 @@ class PreviewEngine(
             mutableState.value=PreviewState(quality=state.value.quality)
             return
         }
-        mutableState.value=state.value.copy(playing=false,buffering=true,error=null,graphRevision=revision,phase=PreviewPhase.COMPILING)
+        mutableState.value=state.value.copy(playing=false,buffering=true,failure=null,graphRevision=revision,phase=PreviewPhase.COMPILING)
         compileJob=scope.launch {
             var unownedPipeline:OutputFramePipeline?=null
             var unownedSources:ResolvedPreviewMedia?=null
@@ -481,24 +514,23 @@ class PreviewEngine(
                     seek(state.value.positionUs)
                     return@launch
                 }
-                val admission=policy.assess(plan,state.value.quality)
-                require(admission.kind!=PreviewAdmissionKind.UNSUPPORTED){admission.reasons.joinToString(" ")}
+                val evidence=linkedMapOf<String,SourceEvidence>()
+                val prepared=preparer.prepare(plan,state.value.quality,forcePreparation,state.value.positionUs,forceProbe,
+                    onStage={ stage->withContext(Dispatchers.Main.immediate) {
+                        if(generation==revision && active) {
+                            // A paused retained player still owns codecs. Release before cache
+                            // verification, probing or normalization acquires another decoder.
+                            if(stage!=null && stage.stage!=PreparationStage.CHECKING && player!=null)releasePlayer()
+                            mutableState.value=state.value.copy(player=player,preparation=stage)
+                        }
+                    } }, onEvent={ kind,id->diagnostics.record(EngineEvent(kind,revision,sourceMediaId=id)) },
+                    onEvidence={ value->evidence[value.format.media.id]=value;sourceEvidence=evidence.toMap() },regenerate=regenerate)
+                unownedSources=prepared.lease
+                val admission=prepared.admission
+                val sources=prepared.lease.sources
+                sourceEvidence=prepared.evidence
                 diagnostics.record(EngineEvent("Admission:${admission.kind}",revision))
-                var sources=emptyMap<String,MediaReference>()
-                if(admission.kind==PreviewAdmissionKind.OPTIMIZED_MEDIA_REQUIRED) {
-                    require(admission.declaredVideoInputs<=EngineResourceBudget.inspect(context).maximumVideoInputs) {
-                        "This preview exceeds the device's safe number of video inputs. No layer was omitted."
-                    }
-                    if(player!=null && optimized==null) {
-                        releasePlayer()
-                        mutableState.value=state.value.copy(player=null)
-                    }
-                    unownedSources=optimizer.resolve(snapshot)
-                    sources=unownedSources.sources
-                    val optimizedProject=snapshot.copy(media=snapshot.media+sources)
-                    val reassessed=policy.assess(withContext(Dispatchers.Default){RenderPlan.derive(optimizedProject)},PreviewQuality.FAST)
-                    require(reassessed.admitted){"The optimized preview still exceeds this device's safe resource budget. No layer was omitted."}
-                }
+                prepared.routes.forEach{(id,route)->diagnostics.record(EngineEvent(route,revision,sourceMediaId=id))}
                 if(generation!=revision || !active)return@launch
                 val (width,height)=admission.quality.dimensions(snapshot.canvas)
                 val compiled=compiler.compile(plan,width,height,
@@ -533,17 +565,18 @@ class PreviewEngine(
                 output.prepare()
                 diagnostics.maxInstallNs=maxOf(diagnostics.maxInstallNs,System.nanoTime()-installStart)
                 oldSources?.close()
+                regenerate=regenerate-sources.keys
                 acknowledgementJob=scope.launch {
                     delay(10_000)
                     if(awaitingInstalledFrame && generation==revision && active)fail("Preview could not submit its initial frame. Retry with a lower preview quality.")
                 }
-                mutableState.value=state.value.copy(player=output,warnings=compiled.warnings+admission.reasons,error=null,admission=admission)
+                mutableState.value=state.value.copy(player=output,warnings=compiled.warnings+admission.reasons,failure=null,preparation=null,admission=admission)
                 // Compilation may have swallowed requests from an older revision; re-admit the
                 // latest UI position after install, never an old decoder position.
                 seek(state.value.positionUs)
                 startClock()
             } catch(cancelled:CancellationException){throw cancelled}
-              catch(error:Exception){if(generation==revision)fail(error.message ?: "This project cannot be previewed.")}
+              catch(error:Exception){if(generation==revision) { if(error is MediaCompatibilityException)fail(error.failure) else fail(error.message ?: "This project cannot be previewed.") }}
             finally{unownedPipeline?.close();unownedSources?.close()}
         }
     }
@@ -581,9 +614,8 @@ class PreviewEngine(
                     publishPlayerState()
                 }
                 override fun onPlayerError(error:PlaybackException) {
-                    if(owner===player && active) {
-                        if(error.errorCode==PlaybackException.ERROR_CODE_DECODER_INIT_FAILED)project?.let(policy::recordFailure)
-                        fail("Preview failed (${error.errorCodeName}). ${error.cause?.cause?.message ?: error.cause?.message ?: error.message.orEmpty()}")
+                    if(owner===player && installedRevision==generation && active) {
+                        handleNativeFailure(error)
                     }
                 }
             })
@@ -627,9 +659,39 @@ class PreviewEngine(
         mutableState.value=old.copy(positionUs=position,playing=output.isPlaying,playWhenReady=requestedPlaying,
             buffering=requests.busy || output.playbackState==Player.STATE_BUFFERING)
     }
-    private fun fail(message:String) {
+    private fun handleNativeFailure(error:PlaybackException) {
+        val snapshot=project ?: return
+        val used=snapshot.timeline.clips.mapNotNull{snapshot.media[it.mediaId]}.filter{it.kind==MediaKind.VIDEO}.distinctBy{it.id}
+        val format=(error as? androidx.media3.exoplayer.ExoPlaybackException)?.rendererFormat
+        val itemId=player?.currentMediaItem?.mediaId
+        val named=listOfNotNull(format?.id,itemId).firstNotNullOfOrNull { id ->
+            snapshot.media[id] ?: snapshot.findClip(id)?.mediaId?.let(snapshot.media::get)
+        }
+        val matching=used.filter { original ->
+            val selected=optimized?.sources?.get(original.id) ?: sourceEvidence[original.id]?.format?.media ?: original
+            (format?.sampleMimeType==null || selected.codecMimeType==format.sampleMimeType) &&
+                (format==null || format.width<=0 || selected.width==format.width) &&
+                (format==null || format.height<=0 || selected.height==format.height)
+        }
+        val source=named ?: matching.singleOrNull() ?: used.singleOrNull()
+        if(source!=null && source.id in optimized?.sources.orEmpty())regenerate=regenerate+source.id
+        val initFailure=error.errorCode==PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
+        if(initFailure && source!=null && source.id !in optimized?.sources.orEmpty() && recoveryAttempts<1) {
+            recoveryAttempts++;sourceEvidence[source.id]?.let(compatibility::recordFailure)
+            forcePreparation=forcePreparation+source.id
+            diagnostics.record(EngineEvent("PREVIEW_RECOVERY",generation,sourceMediaId=source.id))
+            releasePlayer();compileProject(forceCompile=true);return
+        }
+        val kind=if(source==null)MediaFailureKind.AMBIGUOUS_GRAPH_DECODER_FAILURE else if(initFailure)MediaFailureKind.DECODER_INIT else MediaFailureKind.DECODE
+        fail(PreviewFailure(kind,source?.id,
+            source?.let{"Couldn't load ${it.displayName} for editing. You can check it and try again."} ?: "Couldn't load the video layers. Check available resources and try again.",
+            error.errorCodeName,if(source!=null && source.id in optimized?.sources.orEmpty())MediaRetry.PREPARE else MediaRetry.REPROBE,
+            (if(matching.isNotEmpty())matching else used).map{it.id}.toSet(),error))
+    }
+    private fun fail(message:String)=fail(PreviewFailure(MediaFailureKind.UNKNOWN,userMessage=message,technicalReason=message,retry=MediaRetry.RECHECK))
+    private fun fail(failure:PreviewFailure) {
         requestedPlaying=false;requests.clear();releasePlayer()
-        mutableState.value=state.value.copy(player=null,playing=false,playWhenReady=false,buffering=false,error=message,phase=PreviewPhase.FAILED)
+        mutableState.value=state.value.copy(player=null,playing=false,playWhenReady=false,buffering=false,failure=failure,preparation=null,admission=null,phase=PreviewPhase.FAILED)
     }
     private fun releasePlayer() {
         seekPreparationJob?.cancel();seekPreparationJob=null

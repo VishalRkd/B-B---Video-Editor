@@ -20,6 +20,8 @@ class EditorApplication : Application() {
         androidx.media3.common.Flags.enableFlag(androidx.media3.common.Flags.FLAG_PROCESSED_STREAM_CHANGED_AT_START)
     }
     val resourceBudget by lazy { com.bbvideoeditor.app.playback.EngineResourceBudget.inspect(this) }
+    val mediaCompatibilityBackend by lazy { com.bbvideoeditor.app.media.AndroidMediaCompatibilityBackend(this,resourceBudget) }
+    val mediaCompatibility by lazy { com.bbvideoeditor.app.media.MediaCompatibilityService(mediaCompatibilityBackend) }
     val previewPolicy by lazy { com.bbvideoeditor.app.playback.PreviewResourcePolicy(this, resourceBudget) }
     val projects by lazy { ProjectRepository(this) }
     val assets by lazy { com.bbvideoeditor.app.media.OwnedAssetStore(this,projects) }

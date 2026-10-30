@@ -20,9 +20,10 @@ import java.util.concurrent.TimeUnit
 
 /** Shared real-surface conformance harness, also used by repeatable engine performance tests. */
 @UnstableApi
-internal class PreviewTestSession(project: Project, readyTimeoutMs:Long=25_000) : AutoCloseable {
+internal class PreviewTestSession(project: Project, readyTimeoutMs:Long=25_000,
+    engineFactory:(()->PreviewEngine)?=null) : AutoCloseable {
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
-    val engine=main {PreviewEngine(instrumentation.targetContext,CompositionCompiler(instrumentation.targetContext))}
+    val engine=main {engineFactory?.invoke() ?: PreviewEngine(instrumentation.targetContext,CompositionCompiler(instrumentation.targetContext))}
     private val scenario=ActivityScenario.launch(MainActivity::class.java)
     private lateinit var view:PlayerView
     var observation: String = ""
@@ -31,8 +32,11 @@ internal class PreviewTestSession(project: Project, readyTimeoutMs:Long=25_000) 
         scenario.onActivity { activity ->
             view=PlayerView(activity).apply{useController=false};activity.setContentView(view)
             binding=CoroutineScope(Dispatchers.Main.immediate).launch{engine.state.collect{view.player=it.player}}
-            engine.updateProject(project)
         }
+        await("attached native preview surface") {
+            main{(view.videoSurfaceView as? SurfaceView)?.holder?.surface?.isValid==true}
+        }
+        main{engine.updateProject(project)}
         await("native preview ready",readyTimeoutMs) {
             check(engine.state.value.error==null){engine.state.value.error.orEmpty()}
             main{engine.state.value.player?.playbackState==Player.STATE_READY}

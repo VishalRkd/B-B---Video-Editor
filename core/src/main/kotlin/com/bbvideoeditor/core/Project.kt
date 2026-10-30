@@ -25,6 +25,9 @@ data class TimeRange(val startUs: Long = 0, val durationUs: Long) {
 enum class MediaKind { VIDEO, AUDIO, IMAGE }
 
 @Serializable
+enum class FrameRateProvenance { UNKNOWN, TRACK_DECLARED, CAPTURE_METADATA, MEASURED }
+
+@Serializable
 data class MediaReference(
     val id: String = newId(),
     val uri: String,
@@ -42,6 +45,12 @@ data class MediaReference(
     val colorTransfer: Int = 0,
     val audioChannels: Int = 0,
     val audioSampleRate: Int = 0,
+    val frameRateProvenance: FrameRateProvenance = FrameRateProvenance.UNKNOWN,
+    val codecProfile: Int? = null,
+    val codecLevel: Int? = null,
+    val bitDepth: Int? = null,
+    val colorStandard: Int? = null,
+    val colorRange: Int? = null,
 ) {
     init {
         require(id.isNotBlank() && uri.isNotBlank()) { "Media requires an identifier and URI" }

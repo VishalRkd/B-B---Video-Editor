@@ -151,7 +151,7 @@ class MediaImporter(context: Context) {
         )
     }
 
-    private fun readAudioVideo(uri: Uri, name: String, mime: String, size: Long): MediaReference {
+    internal fun readAudioVideo(uri: Uri, name: String, mime: String, size: Long): MediaReference {
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(context, uri, null)
@@ -189,7 +189,7 @@ class MediaImporter(context: Context) {
             }
             require(durationUs > 0L) { "Media has no readable duration" }
             if (video != null) require(width > 0 && height > 0) { "Video dimensions are unavailable" }
-            return MediaReference(
+            val parsed = MediaReference(
                 uri = uri.toString(), displayName = name, kind = if (video != null) MediaKind.VIDEO else MediaKind.AUDIO,
                 durationUs = durationUs, width = width, height = height,
                 rotationDegrees = rotation, frameRate = frameRate.takeIf { it.isFinite() && it > 0 } ?: 0f,
@@ -199,7 +199,10 @@ class MediaImporter(context: Context) {
                 colorTransfer = video?.intOrZero(MediaFormat.KEY_COLOR_TRANSFER) ?: 0,
                 audioChannels = audio?.intOrZero(MediaFormat.KEY_CHANNEL_COUNT) ?: 0,
                 audioSampleRate = audio?.intOrZero(MediaFormat.KEY_SAMPLE_RATE) ?: 0,
+                frameRateProvenance = if (video?.optionalRate() != null) com.bbvideoeditor.core.FrameRateProvenance.TRACK_DECLARED
+                    else if (frameRate > 0) com.bbvideoeditor.core.FrameRateProvenance.CAPTURE_METADATA else com.bbvideoeditor.core.FrameRateProvenance.UNKNOWN,
             )
+            return video?.enrich(parsed) ?: parsed
         } finally {
             extractor.release()
         }

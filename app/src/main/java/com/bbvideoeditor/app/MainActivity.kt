@@ -11,6 +11,8 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -136,6 +138,8 @@ private fun EditorSession(editor: EditorViewModel, app: EditorApplication, impor
             if (playing && currentlyExporting) {
                 editor.updatePlayback(editor.state.value.positionUs, false)
                 editor.message("Preview is paused while the export finishes.")
+            } else if (playing && engine.state.value.failure?.canRetry == false) {
+                editor.updatePlayback(editor.state.value.positionUs,false)
             } else if (playing) engine.play() else engine.pause()
         }
         val observer = LifecycleEventObserver { _, event ->
@@ -172,38 +176,55 @@ private fun PreviewCanvas(modifier: Modifier, engine: PreviewEngine, editor: Edi
     onQuality: (PreviewQuality) -> Unit) {
     val playback by engine.surface.collectAsStateWithLifecycle()
     var qualityMenu by remember { mutableStateOf(false) }
-        Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
-            if (project.durationUs == 0L) EmptyPreview(Modifier.fillMaxSize())
-            else {
-                AndroidView(factory = { context ->
-                    PlayerView(context).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER); setShutterBackgroundColor(android.graphics.Color.BLACK) }
-                }, update = { it.player = playback.player }, onRelease = { it.player = null }, modifier = Modifier.fillMaxSize())
-                TextCanvasLayer(editor, app.textBitmaps, Modifier.fillMaxSize())
-                if (playback.buffering) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-                playback.error?.let { error ->
-                    Surface(color = Panel.copy(alpha = .96f), modifier = Modifier.padding(16.dp)) {
-                        Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(error, fontSize = 12.sp)
-                            TextButton(onClick = { engine.updateProject(project); engine.resume() }) { Text("Retry preview") }
-                        }
-                    }
-                }
-                Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
-                    Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
-                        TextButton(onClick = { qualityMenu = true }) {
-                            Text("Preview · ${playback.effectiveQuality.label}${if(playback.optimized) " · Optimized" else ""}", color = Color.White, fontSize = 11.sp)
-                        }
-                    }
-                    DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
-                        PreviewQuality.entries.forEach { option ->
-                            DropdownMenuItem(text = { Text(option.label) }, onClick = {
-                                onQuality(option)
-                                qualityMenu = false
-                            })
-                        }
-                        Text("Preview detail only. Export uses its own settings.", Modifier.padding(12.dp), fontSize = 11.sp)
+    var failureDetails by remember { mutableStateOf(false) }
+    if(failureDetails) {
+        AlertDialog(onDismissRequest={failureDetails=false},title={Text("Video compatibility details")},
+            text={Text(listOfNotNull(playback.failure?.technicalReason,engine.compatibilityDetails()).joinToString("\n\n"),
+                modifier=Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),fontSize=11.sp)},
+            confirmButton={TextButton(onClick={failureDetails=false}){Text("Close")}})
+    }
+    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+        if (project.durationUs == 0L) EmptyPreview(Modifier.fillMaxSize())
+        else {
+            AndroidView(factory = { context ->
+                PlayerView(context).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER); setShutterBackgroundColor(android.graphics.Color.BLACK) }
+            }, update = { it.player = playback.player }, onRelease = { it.player = null }, modifier = Modifier.fillMaxSize())
+            TextCanvasLayer(editor, app.textBitmaps, Modifier.fillMaxSize())
+            if (playback.buffering) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
+            playback.error?.let { error ->
+                Surface(color = Panel.copy(alpha = .96f), modifier = Modifier.padding(16.dp)) {
+                    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(error, fontSize = 12.sp)
+                        if(playback.failure?.canRetry == true) TextButton(onClick = engine::retry) { Text("Try again") }
+                        TextButton(onClick = { failureDetails=true }) { Text("Details") }
                     }
                 }
             }
+            playback.preparation?.let { preparing ->
+                Surface(color=Panel.copy(alpha=.96f),modifier=Modifier.align(Alignment.BottomCenter).padding(16.dp)) {
+                    Column(Modifier.padding(12.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                        Text(if(preparing.stage==com.bbvideoeditor.app.media.PreparationStage.GENERATING)
+                            "Preparing ${preparing.displayName} for smooth editing…" else "Checking ${preparing.displayName}…",fontSize=12.sp)
+                        preparing.progress?.let { LinearProgressIndicator(progress={it.coerceIn(0,100)/100f}) }
+                    }
+                }
+            }
+            Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
+                Surface(color = Panel.copy(alpha = .9f), shape = RoundedCornerShape(8.dp)) {
+                    TextButton(onClick = { qualityMenu = true }) {
+                        Text("Preview · ${playback.effectiveQuality.label}${if(playback.optimized) " · Optimized" else ""}", color = Color.White, fontSize = 11.sp)
+                    }
+                }
+                DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }) {
+                    PreviewQuality.entries.forEach { option ->
+                        DropdownMenuItem(text = { Text(option.label) }, onClick = {
+                            onQuality(option)
+                            qualityMenu = false
+                        })
+                    }
+                    Text("Preview detail only. Export uses its own settings.", Modifier.padding(12.dp), fontSize = 11.sp)
+                }
+            }
         }
+    }
 }

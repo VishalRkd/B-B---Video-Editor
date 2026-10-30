@@ -42,7 +42,7 @@ data class PreviewMetrics(
     val nativeDecoderReleases:Long, val nativeSeekP95Ns:Long, val maximumNativeSeekNs:Long,
     val nativeRedraws:Long, val maximumInstallNs:Long,
 )
-data class EngineEvent(val kind: String, val revision: Long, val requestId: Long = 0, val timeUs: Long = 0)
+data class EngineEvent(val kind: String, val revision: Long, val requestId: Long = 0, val timeUs: Long = 0, val sourceMediaId:String? = null)
 
 /** Bounded in-memory engineering telemetry. No paths, media names or production log spam. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
