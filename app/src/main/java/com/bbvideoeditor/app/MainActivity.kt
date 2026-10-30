@@ -1,5 +1,7 @@
 package com.bbvideoeditor.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import android.os.Build
 import androidx.activity.ComponentActivity
@@ -178,9 +180,15 @@ private fun PreviewCanvas(modifier: Modifier, engine: PreviewEngine, editor: Edi
     var qualityMenu by remember { mutableStateOf(false) }
     var failureDetails by remember { mutableStateOf(false) }
     if(failureDetails) {
+        val context=LocalContext.current
+        val details=listOfNotNull(playback.failure?.technicalReason,engine.compatibilityDetails()).joinToString("\n\n")
         AlertDialog(onDismissRequest={failureDetails=false},title={Text("Video compatibility details")},
-            text={Text(listOfNotNull(playback.failure?.technicalReason,engine.compatibilityDetails()).joinToString("\n\n"),
+            text={Text(details,
                 modifier=Modifier.heightIn(max=400.dp).verticalScroll(rememberScrollState()),fontSize=11.sp)},
+            dismissButton={TextButton(onClick={
+                context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(
+                    ClipData.newPlainText("Video compatibility details",details))
+            }){Text("Copy")}},
             confirmButton={TextButton(onClick={failureDetails=false}){Text("Close")}})
     }
     Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
